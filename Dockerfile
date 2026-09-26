@@ -1,9 +1,10 @@
 FROM debian:12-slim
 
 LABEL maintainer="Helm (Trinity)"
-LABEL purpose="Trinity self-build minimal MT5 image — Debian 12 base + KasmVNC X server variant (matches gmag11 production X stack)"
+LABEL purpose="mt5-gateway image — Debian 12 base + KasmVNC X server variant (matches gmag11 production X stack); originated as trinity-mt5-image, imported+fixed under WO-MT5GW-0002"
 LABEL wo="WO-NEO-FTMO-PRACTICE-EXECUTION-RET_CODE-10044-DIAGNOSTIC-0001"
-LABEL trinity.image.tag="trinity/mt5:0.1.3-kasmvnc"
+LABEL origin.image.tag="trinity/mt5:0.1.3-kasmvnc"
+LABEL gateway.image.tag="mt5-gateway:0.2.0-rc2"
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=en_US.UTF-8
@@ -59,8 +60,8 @@ RUN mkdir -p /home/headless/.vnc /home/headless/.config/openbox /Metatrader && \
     chown -R headless:headless /home/headless /Metatrader
 
 # Scripts (KasmVNC variant uses a KasmVNC-specific start.sh)
-COPY start.sh.kasmvnc /start.sh
-COPY rpyc_server.py /Metatrader/rpyc_server.py
+COPY start.sh /start.sh
+COPY bridge/rpyc_server.py /Metatrader/rpyc_server.py
 RUN chmod +x /start.sh && \
     chown headless:headless /Metatrader/rpyc_server.py /start.sh
 
