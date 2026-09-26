@@ -82,6 +82,11 @@ sudo mkdir -p "$GATEWAY_SECRETS_DIR"
 sudo chown headless:headless "$GATEWAY_SECRETS_DIR"
 
 # === Step 1 — KasmVNC Xvnc (gmag11-style direct invocation) ===
+# -httpd /usr/share/kasmvnc/www: without this, -websocketPort only opens a raw
+# WebSocket upgrade endpoint -- nothing serves the actual browser client page
+# (index.html + JS), so a plain browser/curl GET gets an empty HTTP reply.
+# Found live during WO-MT5GW-0005's Config-diff handoff: the port fix
+# (5901->6901, WO-MT5GW-0003) was necessary but not sufficient on its own.
 mkdir -p ~/.vnc
 if render_vnc_password; then
     step "[1/12] Starting KasmVNC Xvnc on :$VNC_PORT (websocket :$WEBSOCKET_PORT) — VncAuth enabled from secret"
@@ -98,6 +103,7 @@ Xvnc :$DISPLAY_NUM \
     -depth 24 \
     -rfbport $VNC_PORT \
     -websocketPort $WEBSOCKET_PORT \
+    -httpd /usr/share/kasmvnc/www \
     -interface 0.0.0.0 \
     -sslOnly 0 \
     -RectThreads 0 \
