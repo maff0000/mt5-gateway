@@ -87,6 +87,17 @@ sudo chown headless:headless "$GATEWAY_SECRETS_DIR"
 # (index.html + JS), so a plain browser/curl GET gets an empty HTTP reply.
 # Found live during WO-MT5GW-0005's Config-diff handoff: the port fix
 # (5901->6901, WO-MT5GW-0003) was necessary but not sufficient on its own.
+#
+# Clear stale X11 lock/socket files before launching: WO-MT5GW-0006 added a
+# persistent named volume for /home/headless, but /tmp is still the
+# container's own ephemeral layer -- `docker restart` (as opposed to a full
+# recreate) does NOT clear it, so a lock file from the PREVIOUS run of this
+# same container is still sitting there and Xvnc refuses to start ("Server
+# is already active for display 1"). Found live testing WO-MT5GW-0006 Task
+# 3d (the restart-and-repeat step) -- safe to always remove: if Xvnc is
+# genuinely still running, `docker restart` already killed it (and
+# everything else in the container) before this script runs again.
+rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}"
 mkdir -p ~/.vnc
 if render_vnc_password; then
     step "[1/12] Starting KasmVNC Xvnc on :$VNC_PORT (websocket :$WEBSOCKET_PORT) — VncAuth enabled from secret"
