@@ -84,3 +84,25 @@ Sequence of checks, each on the same fresh no-credential volume:
 **Not attempted without Matt's go, per the WO's own package-upgrade caveat and the broader "propose don't run" discipline on anything beyond what was explicitly asked:** pinning/caching a specific known-good terminal build inside the image; deeper Wine-level IPC tracing (`WINEDEBUG` verbose logging around the MT5↔wine-python IPC channel); testing against an older cached terminal installer.
 
 Test containers (`MT5_GW_RC2_T1`, `MT5_GW_RC2_T2`) and their volumes removed after testing — confirmed gone by re-query.
+
+## Corrections (Matt, 2026-09-26)
+
+### Correction 1 — Compose files
+
+Confirmed: compose files are correctly excluded from Task 2's import. The instance compose file will be written fresh later, not carried over from the old test harness.
+
+### Correction 2 — GitHub auth risk acceptance
+
+`gh` was found already authenticated on dell-debian with the same broad personal token used on trinity (`admin:enterprise`, `admin:org`, `admin:repo_hook`, etc. — pre-existing on this host, not something introduced by this WO). **Accepted by Matt** alongside the root-access risk acceptance above, with constraints:
+- Usable **only** for PR operations on `maff0000/mt5-gateway` and `maff0000/tron`: `gh pr create` / `gh pr view` / `gh pr list` / `gh repo view`.
+- **Never** for admin, org, settings, other repos, or any delete operation.
+- Push still goes through the repo-scoped deploy key once Matt adds it — the broad token is not used for `git push`.
+- **Revisit trigger:** must be replaced with a scoped fine-grained token before any live broker credentials are used on this host, or before the repos go private at MVP — whichever comes first.
+
+### Correction 3 — Task 3 package differential was not actually established
+
+The Task 3 evidence above states "package version ruled out" after testing `MetaTrader5` `5.0.36` → `5.0.37`. **That conclusion does not hold.** Verified against PyPI directly (`https://pypi.org/pypi/MetaTrader5/json`):
+
+- Current latest is **`5.0.6180`** (not `5.0.37` — `pip index versions` inside the container only listed `5.0.37` because it silently filters to wheels compatible with the running interpreter).
+- **Every version from `5.0.5328` onward (and all versions checked back through the list) ships `win_amd64`-only wheels — no 32-bit (`win32`) wheel at all.** This image runs 32-bit Wine Python (`Python39-32`), so a current package **cannot be installed on this image as it stands** — not "wasn't tested," genuinely can't be installed without a 64-bit Python rebuild.
+- What was actually tested was a one-minor-version bump (`5.0.36` → `5.0.37`), the last version that still shipped a 32-bit wheel at the time this differential was attempted — not a real test against current. That result (unchanged `-10005` failure) stands as data, but "package version ruled out" as a conclusion is withdrawn. Package version remains an **open variable**, gated behind a 32-bit vs. 64-bit Python architecture decision that hasn't been made.
