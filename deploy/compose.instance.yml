@@ -19,7 +19,7 @@
 
 services:
   mt5-gateway:
-    image: mt5-gateway:0.2.0-rc3
+    image: mt5-gateway:0.2.0-rc4
     container_name: ${INSTANCE_NAME}
     restart: "no"
     env_file:
@@ -47,6 +47,22 @@ services:
       - mt5_password
       - vnc_password
       - bridge_token
+    volumes:
+      # WO-MT5GW-0006: shared broker-directory seed, read-only, host-only --
+      # NEVER committed to git. Not instance-specific (same seed for every
+      # instance), so this path is a fixed host path rather than an
+      # ${INSTANCE_DIR}-relative one like the secrets above. start.sh copies
+      # this into the terminal's own Config/ on first boot ONLY (see
+      # seed_servers_dat_if_missing() in start.sh) -- later boots never
+      # touch it again, so anything a user finds/adds via "Find your
+      # company" persists across restarts instead of being overwritten.
+      - /srv/mt5-gateway-instances/_shared/servers.dat:/seed/servers.dat:ro
+      # Persistent named volume for the Wine prefix + terminal state (MT5
+      # install, Config/, logs) -- WITHOUT this, every container recreation
+      # is a full fresh MT5 install from scratch (~90-100s) and nothing
+      # survives a restart. Named mt5-<broker>-<env>-data per the instance
+      # naming convention; ${INSTANCE_NAME} already IS mt5-<broker>-<env>.
+      - data:/home/headless
     tmpfs:
       # WO-MT5GW-0003: start.sh renders the MT5 login config and the KasmVNC
       # VncAuth password file here from the Docker secrets above -- tmpfs
@@ -70,6 +86,14 @@ secrets:
     file: ${INSTANCE_DIR}/secrets/vnc_password
   bridge_token:
     file: ${INSTANCE_DIR}/secrets/bridge_token
+
+volumes:
+  # Persistent per-instance Wine prefix + terminal state. Compose creates
+  # this itself on first `up` (prefixed with the project/instance name,
+  # same convention as the network below) -- never `docker volume create`d
+  # by hand.
+  data:
+    name: ${INSTANCE_NAME}-data
 
 networks:
   # Compose-project-scoped network, created by `docker compose up` itself when

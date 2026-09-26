@@ -346,6 +346,39 @@ step "Pre-seeding/reasserting [Common] AutoUpdate + [Experts] Api/AllowDllImport
 preseed_experts_and_autoupdate
 step "AutoUpdate + Python-API gate reasserted"
 
+# === Step 10.6 — Seed the broker directory (servers.dat), FIRST START ONLY ===
+# WO-MT5GW-0006: a fresh MT5 install's own default servers.dat only contains
+# MetaQuotes' own demo servers -- boutique/prop-firm brokers (confirmed:
+# Vantage, FTMO) are simply absent, and the terminal has no way to resolve
+# their server names without this file (this is a real, live-verified
+# finding, not a Wine/IPC bug -- see docs/evidence/WO-MT5GW-0005.md and
+# WO-MT5GW-0006.md). /seed/servers.dat is a read-only bind mount of the
+# shared, pre-merged directory (see compose.instance.yml). This only ever
+# runs on a volume's first boot -- once the terminal has its own
+# servers.dat (ours or one it wrote itself), it is NEVER touched again, so
+# any brokers a user finds/adds later via Find your company are preserved
+# across restarts.
+seed_servers_dat_if_missing() {
+    local target="$MT5_DIR/Config/servers.dat"
+    local seed="/seed/servers.dat"
+    [ -f "$target" ] && return 0
+    [ -s "$seed" ] || return 0
+    mkdir -p "$MT5_DIR/Config"
+    cp "$seed" "$target"
+    chmod 0644 "$target"
+    return 0
+}
+if [ -f "$MT5_DIR/Config/servers.dat" ]; then
+    step "Broker directory (servers.dat) already present -- not touching it"
+else
+    seed_servers_dat_if_missing
+    if [ -f "$MT5_DIR/Config/servers.dat" ]; then
+        step "Seeded broker directory (servers.dat) from shared seed (first start only)"
+    else
+        step "No shared seed available -- terminal will use its own default broker directory"
+    fi
+fi
+
 # === Step 11 — Launch MT5 ===
 step "[11/12] Launching MT5"
 mkdir -p "$MT5_MQL5_FILES" 2>/dev/null
