@@ -46,8 +46,9 @@ secretGroup = 1
 keywords = ["login"]
 
 [allowlist]
-description = "Placeholders in example files"
+description = "Placeholders in example files, and Docker Compose secrets: file: references (our own password-name rules match the YAML key like mt5_password:/vnc_password: and capture across the newline into the following file: line -- not a literal secret value)"
 regexes = [
   '''^<[^>]*>$''',
   '''(?i)^(changeme|placeholder|example|redacted)$''',
+  '''^file:''',
 ]
