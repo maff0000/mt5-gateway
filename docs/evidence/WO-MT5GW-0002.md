@@ -49,3 +49,38 @@ Helm operates as **root** on dell-debian via a **root SSH key originating from t
 Unrelated to the MT5 work. This is Claude Code's own **voice output** feature: `/root/.claude/settings.json` on trinity has `"voice": {"enabled": true, "mode": "hold"}` plus a user-level `Stop` hook posting to `http://192.168.246.77:8765/speak` on every turn end, for text-to-speech.
 
 `192.168.246.77` answers ARP/ICMP on the LAN (host is up), but nothing listens on TCP 8765 (connection actively refused, not a timeout) — most likely a companion voice-output app on that device isn't currently running. No fix applied or needed on trinity's or dell-debian's service stack; this sits outside both.
+
+## Task 3 — T2 fix, rebuild, retest (dell-debian)
+
+### Fix applied
+
+`start.sh`'s `preseed_experts_and_autoupdate()` (replacing the old `suppress_auto_update()`, which only patched an *existing* `common.ini` and was therefore a no-op on a genuinely fresh volume): creates `Config/common.ini` from scratch when absent, always reasserts `[Common] AutoUpdate=0` and `[Experts] Api=1` / `AllowDllImport=1` (plus `Account=0`/`Profile=0`/`Chart=0` per prior KRONOS/Helm doctrine), called unconditionally right before every launch — not only after a fresh install. Also fixed the Dockerfile's `COPY` paths, which still pointed at the old pre-rename filenames from the source tree (first rc2 build attempt failed at `COPY` for exactly this reason — fixed and rebuilt).
+
+### Rebuild
+
+- `mt5-gateway:0.2.0-rc2`, `--no-cache`, built on dell-debian from this repo's own `Dockerfile`.
+- Digest: `sha256:a6dcb387ba9426d78f358e3064f0b3770f679afc173eae2b7370e137703a00d4`
+- Wine confirmed: `wine-stable 10.0.0.0~bookworm-1` (same pin as rc1).
+- Terminal build installed fresh: **6230** (same as rc1 — MetaQuotes' installer always fetches current; nothing here pins a specific terminal build number, this remains an open risk, previously flagged as R12 in the original design doc).
+
+### T0 — PASS
+Build completed clean, no cache. Wine version confirmed as above.
+
+### T1 — PASS
+Fresh no-credential container, isolated volume. Journal: `automated trading is enabled` → `disabled` → clean toggle proof, identical to rc1. No identity ever touched.
+
+### T2 — STILL FAILS. Root cause is deeper than the fix addressed; reporting honestly rather than declaring this closed.
+
+Sequence of checks, each on the same fresh no-credential volume:
+
+1. **Gate confirmed correct before any GUI interaction.** Read `common.ini` immediately after boot, before touching anything: `AutoUpdate=0`, `[Experts] AllowDllImport=1 Api=1 Account=0 Profile=0 Chart=0` — all present exactly as the fix intends. The T2 fix works as designed.
+2. **First RPyC attempt with the gate correct:** `mt5.initialize()` → `False`, `last_error = [-10005, 'IPC timeout']`. Same failure signature as rc1, despite the gate fix.
+3. **Screen check:** same two stacked modal dialogs as rc1 reproduced ("Select a company to open an account with" + "Welcome to LiveUpdate"/Restart prompt) — **`AutoUpdate=0` does not suppress the LiveUpdate popup**, contrary to the original design assumption. Dismissed both via the same click sequence as rc1.
+4. **Retest after dismissal, gate still correct:** `mt5.initialize()` → `False`, `last_error = [-10005, 'IPC timeout']` again. Rules out the dialogs as the (sole) cause too.
+5. **Differential test (per WO instruction — test only, not merged):** upgraded `MetaTrader5` package from `5.0.36` to the current latest, `5.0.37`, against the *same* installed terminal build (6230). Restarted `rpyc_server.py` to pick up the new package, confirmed `mt5.__version__ == '5.0.37'` on the next connection. Retest: `mt5.initialize()` → `False`, `last_error = [-10005, 'IPC timeout']` — **unchanged**. Package version is not the cause either.
+
+**Net result:** three independent variables were tested and ruled out — the Python-API gate (now fixed and confirmed correct), the first-run modal dialogs (dismissed and confirmed clean), and the `MetaTrader5` package version (differential-tested against current). All three ruled out; the timeout persists identically across every combination. This points toward something structural in this specific terminal build (6230) or its IPC negotiation under Wine 10.0 that none of the previously-documented fixes address — closest match is risk R12 from the original design doc ("build 5836 vs 5833 vs newer MT5 builds — Python API IPC may regress on newer builds"), which was flagged as a risk in May and never actually mitigated (no terminal-build pinning mechanism exists in either `start.sh` variant — the installer always fetches whatever MetaQuotes currently serves).
+
+**Not attempted without Matt's go, per the WO's own package-upgrade caveat and the broader "propose don't run" discipline on anything beyond what was explicitly asked:** pinning/caching a specific known-good terminal build inside the image; deeper Wine-level IPC tracing (`WINEDEBUG` verbose logging around the MT5↔wine-python IPC channel); testing against an older cached terminal installer.
+
+Test containers (`MT5_GW_RC2_T1`, `MT5_GW_RC2_T2`) and their volumes removed after testing — confirmed gone by re-query.
