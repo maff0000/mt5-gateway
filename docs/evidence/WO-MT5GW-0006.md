@@ -1,6 +1,6 @@
 # WO-MT5GW-0006 — Shared Broker Directory Template + Retest
 
-All work on dell-debian except the deploy-key exception below (GitHub settings, explicitly authorized). No identifiers appear anywhere in this document.
+All work on dell-debian except the deploy-key exception below (GitHub settings, explicitly authorized). No account identifiers appear anywhere in this document; the two broker-server IP addresses observed in Task 3b are redacted below (corrected WO-MT5GW-0010 — this line previously claimed no identifiers at all, which was inaccurate).
 
 ## One-off exception — deploy keys added via `gh` (2026-09-26)
 
@@ -56,8 +56,8 @@ Matt's Vantage demo secrets already in place from WO-MT5GW-0003.
 
 **3b — Real broker connection, verified the required way (not title bar, not chart data):**
 ```
-ESTABLISHED  28.179.164.194:443
-ESTABLISHED  145.247.117.166:700
+ESTABLISHED  <BROKER_SERVER_IP_1>:443
+ESTABLISHED  <BROKER_SERVER_IP_2>:700
 ```
 Both genuinely external addresses, confirmed via `/proc/net/tcp` inside the container. The second (port 700, with neighbouring ports 701-703 seen cycling through TIME_WAIT across this session) matches an MT5 trade-server protocol's typical port cluster pattern.
 

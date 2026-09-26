@@ -201,10 +201,9 @@ fi
 # [Experts] gate keys, whether the file is being created or patched.
 #
 # [Experts] Account=0/Profile=0/Chart=0 are included alongside Api=1/AllowDllImport=1
-# per prior KRONOS/Helm doctrine (helm:doctrine:wine_mt5_python_api_gate_and_options_
-# navigation:v1) — these three persist pre-launch and defeat MT5's auto-disable
-# triggers that would otherwise flip Api back to 0 after a restart. This goes beyond
-# the WO's literal minimum (Api=1, AllowDllImport=1) but directly serves keeping
+# because these three persist pre-launch and defeat MT5's auto-disable triggers
+# that would otherwise flip Api back to 0 after a restart. This goes beyond the
+# WO's literal minimum (Api=1, AllowDllImport=1) but directly serves keeping
 # those two durable, so it is included rather than left as a known gap.
 preseed_experts_and_autoupdate() {
     mkdir -p "$MT5_DIR/Config"

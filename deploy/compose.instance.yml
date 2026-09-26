@@ -41,12 +41,18 @@ services:
       # are mounted root:root mode 0400 regardless; the container's process
       # runs as the non-root "headless" user (uid 1000) and cannot read them
       # directly. Fixed in start.sh instead: headless has passwordless sudo
-      # (see the Dockerfile), so render_vnc_password() and
+      # (see the Dockerfile), so render_kasm_basicauth_password() and
       # render_mt5_ini_from_secrets() read the secret files via `sudo`.
+      #
+      # bridge_token removed WO-MT5GW-0010: never wired to anything -- the
+      # RPyC bridge is unauthenticated classic RPyC (SlaveService), and
+      # provisioning a secret that nothing checks is worse than not having
+      # one at all (implies protection that isn't there). See
+      # docs/evidence/WO-MT5GW-0010.md for the accepted risk and what an
+      # authenticated bridge requires.
       - mt5_login
       - mt5_password
       - vnc_password
-      - bridge_token
     volumes:
       # WO-MT5GW-0006: shared broker-directory seed, read-only, host-only --
       # NEVER committed to git. Not instance-specific (same seed for every
@@ -84,8 +90,6 @@ secrets:
     file: ${INSTANCE_DIR}/secrets/mt5_password
   vnc_password:
     file: ${INSTANCE_DIR}/secrets/vnc_password
-  bridge_token:
-    file: ${INSTANCE_DIR}/secrets/bridge_token
 
 volumes:
   # Persistent per-instance Wine prefix + terminal state. Compose creates
