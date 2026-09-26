@@ -25,10 +25,15 @@ services:
     env_file:
       - ${INSTANCE_DIR}/instance.env
     ports:
-      # KasmVNC only. The RPyC/bridge port (18812 inside the container) is
-      # intentionally NOT published here — it stays reachable only from other
-      # containers on this compose project's own network below.
-      - "${VNC_BIND}:5901"
+      # KasmVNC web/websocket port (6901) -- confirmed via WO-MT5GW-0003
+      # Task 1's real run that the raw RFB port (5901, the original choice
+      # here) never actually binds a listener in this image at all (checked
+      # /proc/net/tcp inside a running container: only 6901 and the bridge
+      # port 18812 are listening). The RPyC/bridge port (18812 inside the
+      # container) is intentionally NOT published here -- it stays reachable
+      # only from other containers on this compose project's own network
+      # below.
+      - "${VNC_BIND}:6901"
     secrets:
       # Docker Compose (non-Swarm) does NOT support the uid/gid/mode
       # overrides above -- confirmed via a live "not supported, they will be
