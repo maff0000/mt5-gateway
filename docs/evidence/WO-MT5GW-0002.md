@@ -106,3 +106,46 @@ The Task 3 evidence above states "package version ruled out" after testing `Meta
 - Current latest is **`5.0.6180`** (not `5.0.37` — `pip index versions` inside the container only listed `5.0.37` because it silently filters to wheels compatible with the running interpreter).
 - **Every version from `5.0.5328` onward (and all versions checked back through the list) ships `win_amd64`-only wheels — no 32-bit (`win32`) wheel at all.** This image runs 32-bit Wine Python (`Python39-32`), so a current package **cannot be installed on this image as it stands** — not "wasn't tested," genuinely can't be installed without a 64-bit Python rebuild.
 - What was actually tested was a one-minor-version bump (`5.0.36` → `5.0.37`), the last version that still shipped a 32-bit wheel at the time this differential was attempted — not a real test against current. That result (unchanged `-10005` failure) stands as data, but "package version ruled out" as a conclusion is withdrawn. Package version remains an **open variable**, gated behind a 32-bit vs. 64-bit Python architecture decision that hasn't been made.
+
+## Task 3b — Reference differential: gmag11/metatrader5_vnc (dell-debian, no credentials)
+
+Ran a fresh `gmag11/metatrader5_vnc:latest` container on dell-debian, throwaway volume, isolated docker network (`mt5gw-refdiff-net`, no host-published RPyC port — the RPyC test connected from a second throwaway helper container on the same isolated network, never via a host port). Not one of the live containers; nothing live was touched or restarted. All test resources removed afterward and confirmed gone.
+
+### What the stock image actually ships (undocumented before this test)
+
+- The vanilla image does **not** auto-start any RPyC bridge — it only installs Wine, MT5, and a Python 3.9.13 32-bit environment. Whatever exposes port 18812 on the real production `MT5_Vantage`/`MT5_FTMO_Practice`/`MT5_FundedNext` containers was added by the team on top of this base, same as our own build does.
+- Its Wine Python environment already has **`mt5linux==1.1.1`** installed (`plumbum==1.7.0`, `rpyc>=6.0.0,<7` as its own dependencies) — this is the real production bridge package (a maintained PyPI project providing a Linux-side `MetaTrader5` proxy), not a hand-rolled script like our `bridge/rpyc_server.py`. This is a genuine, previously-undocumented architecture difference worth carrying into any future production-migration decision.
+- Its default (unpinned) `numpy` is **2.0.2** — which breaks the `MetaTrader5` C extension import (`numpy.core.multiarray failed to import`), exactly the failure mode our own build's `numpy<2` pin exists to prevent. This is not something I introduced; it's what a stock `pip install` resolves to today. Fixed to `numpy==1.26.4` (matching our pin) purely to make the test runnable.
+- Default `rpyc` is **6.0.2**, protocol-incompatible with our `rpyc==5.2.3` client/server. Downgraded to `5.2.3` purely to make the test runnable (mt5linux's own dependency constraint on rpyc was overridden for this test — mt5linux itself was not used or tested here, only the base Wine/terminal environment plus our own bridge script, to isolate the same variable as rc2's test).
+
+### Recorded facts
+
+| | gmag11 (dell-debian, this test) | rc2 (mt5-gateway, dell-debian) |
+|---|---|---|
+| Wine | `wine-10.0` (`wine-stable 10.0.0.0~bookworm-1` family) | `wine-10.0` (`wine-stable 10.0.0.0~bookworm-1`) — same |
+| Terminal build | **6230** (fresh install, same day) | **6230** (fresh install, same day) — same |
+| Python | 3.9.13, 32-bit (`Python39-32`) | 3.9.13, 32-bit (`Python39-32`) — same |
+| MetaTrader5 package (as shipped) | 5.0.36 | 5.0.36 — same |
+| numpy (as shipped, unpinned) | **2.0.2** (broken; fixed to 1.26.4 to test) | 1.26.4 (pinned `<2` in image build) |
+| rpyc (as shipped) | **6.0.2**, via `mt5linux` (downgraded to 5.2.3 to test) | 5.2.3 (pinned in image build) |
+| Bridge mechanism | none by default; `mt5linux` package present but not used in this test — our own `rpyc_server.py` copied in instead, for a controlled comparison | `bridge/rpyc_server.py` (same script) |
+| [Experts] gate at test time | unset (no fix applied — this is stock gmag11, our T2 fix was never ported to it) | `Api=1`/`AllowDllImport=1` (our T3 fix, confirmed set) |
+| First-run dialogs | **identical** stack: "Select a company to open an account with" + "Welcome to LiveUpdate" restart prompt | identical stack (confirmed on rc1 and rc2) |
+| `mt5.initialize()` result | **`False`, `last_error = [-10005, 'IPC timeout']`** | `False`, `last_error = [-10005, 'IPC timeout']` |
+
+### Verdict: gmag11 FAILS identically
+
+Once the test environment was made runnable (matching rpyc protocol version, fixing the numpy ABI break neither of us caused but both needed fixed to test at all), **the production-baseline image fails the exact same way, on the exact same terminal build, that our self-build does.** This was confirmed with `terminal_info()` returning `None` and the identical `-10005` error, not just an assumption from the identical dialog screenshot.
+
+**What this does and doesn't establish:**
+- Establishes: this is not a defect specific to our `Dockerfile`/`start.sh`/`rpyc_server.py`. The reference baseline the whole self-build was validated against in May reproduces the identical failure today, on today's terminal build.
+- Does **not** establish gmag11's own gate state, since our T2 fix was never applied there — gmag11's `common.ini` had no `[Experts]` section at all, same starting point our own build had before the fix. This doesn't weaken the finding (our own rc2 already independently ruled the gate out, with the fix confirmed applied), it just means gmag11 wasn't a second independent test of the gate specifically.
+- Dialog-dismissal parity was **not** independently repeated on gmag11 — its stock image has no `xdotool` (confirmed absent), so the click-based dismissal used on rc1/rc2 couldn't be run there. The pre-dismissal failure was confirmed directly on gmag11; the post-dismissal result is inferred from rc2's identical behavior, not independently reproduced here.
+
+**Leading hypothesis, now better supported:** MT5 terminal build **6230** has a Wine-10.0 IPC regression that is independent of image packaging — matches the pre-existing risk R12 from the original design doc, now with cross-image evidence rather than a single data point.
+
+Test resources removed and confirmed gone: `MT5_REFDIFF_GMAG11`, `MT5_REFDIFF_HELPER` containers, `helm_mt5gw_refdiff_gmag11_config` volume, `mt5gw-refdiff-net` network — all re-queried empty after removal.
+
+**Unplanned discovery during cleanup verification:** dell-debian runs its own `MT5_Vantage` container (same image, same port pattern `3010→3000`/`18812→18812`, `Up 5 weeks`) — pre-existing, not created by this or any WO-MT5GW-000x work, untouched throughout. Flagged separately to Matt and recorded in fabric (`helm:finding:dell_debian_has_own_mt5_vantage_container:v1`) since it shares a name/port pattern with the container Matt confirmed backs Agent Smith on trinity — real risk of a future cross-host cleanup targeting the wrong one by name alone.
+
+**No image changes made.** No changes merged to `Dockerfile`/`start.sh` from this task — this was diagnostic only, per instruction.
