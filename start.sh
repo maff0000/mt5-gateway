@@ -1,7 +1,10 @@
 #!/bin/bash
-# Trinity self-build MT5 image — KasmVNC variant start.sh.
+# mt5-gateway start.sh (KasmVNC variant, imported from trinity-mt5-image).
 # Launches KasmVNC's Xvnc directly with gmag11-style args (single architectural
 # change vs 0.1.2 — TigerVNC standalone replaced by KasmVNC Xvnc).
+# WO-MT5GW-0002 Task 3: pre-seeds/reasserts [Common] AutoUpdate=0 and the
+# [Experts] Python-API gate (Api=1, AllowDllImport=1) before every launch —
+# see the comment on preseed_experts_and_autoupdate() below for why.
 
 # === Step 0 — IME hardening ===
 unset XMODIFIERS GTK_IM_MODULE QT_IM_MODULE XIM XIM_PROGRAM
@@ -98,51 +101,103 @@ else
     step "[6/12] MT5 already installed"
 fi
 
-# === Step 7 — Suppress MT5 auto-update (R3) ===
-suppress_auto_update() {
-    [ -f "$MT5_COMMON_INI" ] || return 0
+# === Step 7 — Pre-seed / reassert [Common] AutoUpdate + [Experts] Python-API gate ===
+# T2 FIX (WO-MT5GW-0002 Task 3): this function is defined here but CALLED just before
+# Step 11 (Launch) below, not here — it must run immediately before every launch, not
+# just once after a fresh install, so it also reasserts on runs where Steps 6/8/9 were
+# skipped because everything was already installed.
+#
+# Root cause this fixes: the previous version of this function only PATCHED an
+# existing common.ini ("[ -f "$MT5_COMMON_INI" ] || return 0") and only touched
+# [Common] AutoUpdate. On a genuinely fresh volume common.ini does not exist until
+# MT5's own first run creates it, so that early-return made the function a no-op on
+# first boot — and MT5's own default for [Experts] on a fresh profile is Api=0 /
+# AllowDllImport=0 (Python API disabled). Nothing upstream of the terminal's first
+# launch ever set it to 1. That is what reproduced the T2 "-10005 IPC timeout" on a
+# completely fresh, no-credential volume (verified directly: common.ini after a fresh
+# boot had no [Experts] section at all until MT5 itself wrote Api=0 the first time a
+# user touched the toolbar). This function now creates common.ini from scratch when
+# it does not exist, and always reasserts both [Common] AutoUpdate=0 and the
+# [Experts] gate keys, whether the file is being created or patched.
+#
+# [Experts] Account=0/Profile=0/Chart=0 are included alongside Api=1/AllowDllImport=1
+# per prior KRONOS/Helm doctrine (helm:doctrine:wine_mt5_python_api_gate_and_options_
+# navigation:v1) — these three persist pre-launch and defeat MT5's auto-disable
+# triggers that would otherwise flip Api back to 0 after a restart. This goes beyond
+# the WO's literal minimum (Api=1, AllowDllImport=1) but directly serves keeping
+# those two durable, so it is included rather than left as a known gap.
+preseed_experts_and_autoupdate() {
+    mkdir -p "$MT5_DIR/Config"
     python3 - "$MT5_COMMON_INI" <<'PY' 2>/dev/null || true
 import sys
 from pathlib import Path
+
 p = Path(sys.argv[1])
-raw = p.read_bytes()
-bom = b''
-data = raw
-if raw.startswith(b'\xff\xfe'):
+desired_common = {"AutoUpdate": "0"}
+desired_experts = {"AllowDllImport": "1", "Api": "1",
+                    "Account": "0", "Profile": "0", "Chart": "0"}
+
+if p.exists():
+    raw = p.read_bytes()
+    bom = b''
+    data = raw
+    if raw.startswith(b'\xff\xfe'):
+        bom = b'\xff\xfe'
+        data = raw[2:]
+    text = data.decode('utf-16-le', errors='replace')
+    nl = '\r\n' if '\r\n' in text else '\n'
+    lines = text.split(nl)
+else:
+    raw = b''
     bom = b'\xff\xfe'
-    data = raw[2:]
-text = data.decode('utf-16-le', errors='replace')
-nl = '\r\n' if '\r\n' in text else '\n'
-lines = text.split(nl)
-in_common = False
-au_set = False
-for i, line in enumerate(lines):
-    s = line.strip('\x00').strip()
-    if s.startswith('['):
-        in_common = (s == '[Common]')
-        continue
-    if not in_common or '=' not in s:
-        continue
-    k = s.split('=', 1)[0].strip()
-    if k == 'AutoUpdate':
-        lines[i] = "AutoUpdate=0"
-        au_set = True
-if not au_set:
+    nl = '\r\n'
+    lines = []
+
+def apply_section(lines, section, desired):
+    start = None
+    end = len(lines)
     for i, line in enumerate(lines):
         s = line.strip('\x00').strip()
-        if s == '[Common]':
-            lines.insert(i + 1, "AutoUpdate=0")
-            au_set = True
+        if s == section:
+            start = i
+            end = len(lines)
+            for j in range(i + 1, len(lines)):
+                t = lines[j].strip('\x00').strip()
+                if t.startswith('[') and t.endswith(']'):
+                    end = j
+                    break
             break
+    if start is None:
+        if lines and lines[-1].strip('\x00').strip() != '':
+            lines.append('')
+        lines.append(section)
+        for k, v in desired.items():
+            lines.append(f"{k}={v}")
+        return lines
+    seen = set()
+    for i in range(start + 1, end):
+        s = lines[i].strip('\x00').strip()
+        if '=' not in s:
+            continue
+        k = s.split('=', 1)[0].strip()
+        if k in desired:
+            lines[i] = f"{k}={desired[k]}"
+            seen.add(k)
+    missing = [k for k in desired if k not in seen]
+    for k in missing:
+        lines.insert(end, f"{k}={desired[k]}")
+        end += 1
+    return lines
+
+lines = apply_section(lines, '[Common]', desired_common)
+lines = apply_section(lines, '[Experts]', desired_experts)
+
 new_text = nl.join(lines)
 new_data = bom + new_text.encode('utf-16-le')
 if new_data != raw:
     p.write_bytes(new_data)
 PY
 }
-step "[7/12] Suppressing MT5 auto-update"
-suppress_auto_update
-step "[7/12] AutoUpdate suppression applied"
 
 # === Step 8 — Install Wine Python 3.9.13 32-bit ===
 if [ ! -f "/home/headless/.wine/drive_c/Program Files (x86)/Python39-32/python.exe" ]; then
@@ -198,6 +253,11 @@ if changed:
 PY
 }
 reset_offscreen_dialogs
+
+# === Step 10.5 — Reassert AutoUpdate + Python-API gate (T2 fix, every start) ===
+step "Pre-seeding/reasserting [Common] AutoUpdate + [Experts] Api/AllowDllImport gate"
+preseed_experts_and_autoupdate
+step "AutoUpdate + Python-API gate reasserted"
 
 # === Step 11 — Launch MT5 ===
 step "[11/12] Launching MT5"
