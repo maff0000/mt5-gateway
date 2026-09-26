@@ -5,6 +5,10 @@
 # WO-MT5GW-0002 Task 3: pre-seeds/reasserts [Common] AutoUpdate=0 and the
 # [Experts] Python-API gate (Api=1, AllowDllImport=1) before every launch —
 # see the comment on preseed_experts_and_autoupdate() below for why.
+# WO-MT5GW-0003 Task 0: reads credentials from Docker secrets
+# (/run/secrets/mt5_login, mt5_password, vnc_password) instead of expecting
+# a pre-rendered mt5.ini bind-mount or an env-var VNC password — see
+# render_mt5_ini_from_secrets() and render_vnc_password() below.
 
 # === Step 0 — IME hardening ===
 unset XMODIFIERS GTK_IM_MODULE QT_IM_MODULE XIM XIM_PROGRAM
@@ -27,24 +31,48 @@ MT5_DIR="/home/headless/.wine/drive_c/Program Files/MetaTrader 5"
 MT5_EXE="$MT5_DIR/terminal64.exe"
 MT5_MQL5_FILES="$MT5_DIR/MQL5/Files"
 MT5_COMMON_INI="$MT5_DIR/Config/common.ini"
-WIN_MT5_INI="C:\\Program Files\\MetaTrader 5\\MQL5\\Files\\mt5.ini"
 
 WINE_PY_INSTALLER="/tmp/python-installer.exe"
 WINE_PY_URL="https://www.python.org/ftp/python/3.9.13/python-3.9.13.exe"
 WINE_PY_BIN="C:\\Program Files (x86)\\Python39-32\\python.exe"
 
+# === WO-MT5GW-0003 Task 0 — secrets wiring ===
+# Everything rendered from /run/secrets/* goes to tmpfs ONLY, never into the
+# persistent /home/headless volume, and is never echoed/logged — only
+# generic status lines via step(). If a secret is absent/empty the container
+# still boots (no-credential mode, same as every T0-T2 test so far); it just
+# skips the credentialed launch / VNC-auth steps below.
+GATEWAY_SECRETS_DIR="/run/gateway-secrets"
+RENDERED_MT5_INI="$GATEWAY_SECRETS_DIR/mt5.ini"
+WIN_RENDERED_MT5_INI="Z:\\run\\gateway-secrets\\mt5.ini"
+VNC_PASSWD_FILE="$GATEWAY_SECRETS_DIR/vnc.passwd"
+
 step() { echo "[$(date -u +%FT%TZ)] $1" | tee -a "$START_LOG"; }
 fail() { echo "[$(date -u +%FT%TZ)] FAIL $1" | tee -a "$START_LOG" >&2; exit 1; }
 
+# Renders the KasmVNC VncAuth password file from /run/secrets/vnc_password.
+# Never prints the value; feeds it to vncpasswd twice (password + confirm)
+# via a pipe, per vncpasswd's own documented non-interactive usage.
+render_vnc_password() {
+    local src="/run/secrets/vnc_password"
+    [ -s "$src" ] || return 1
+    mkdir -p "$GATEWAY_SECRETS_DIR"
+    { cat "$src"; echo; cat "$src"; echo; } | vncpasswd -u headless -w -r "$VNC_PASSWD_FILE" >/dev/null 2>&1
+    [ -s "$VNC_PASSWD_FILE" ]
+}
+
 # === Step 1 — KasmVNC Xvnc (gmag11-style direct invocation) ===
-step "[1/12] Starting KasmVNC Xvnc on :$VNC_PORT (websocket :$WEBSOCKET_PORT)"
 mkdir -p ~/.vnc
-# KasmVNC requires its own password format (or run without auth in isolated test)
-# Use -SecurityTypes None -disableBasicAuth for isolated test container
+if render_vnc_password; then
+    step "[1/12] Starting KasmVNC Xvnc on :$VNC_PORT (websocket :$WEBSOCKET_PORT) — VncAuth enabled from secret"
+    XVNC_SECURITY_ARGS=(-SecurityTypes VncAuth -PasswordFile "$VNC_PASSWD_FILE")
+else
+    step "[1/12] Starting KasmVNC Xvnc on :$VNC_PORT (websocket :$WEBSOCKET_PORT) — no vnc_password secret, running WITHOUT auth (no-credential test mode only)"
+    XVNC_SECURITY_ARGS=(-disableBasicAuth -SecurityTypes None)
+fi
 Xvnc :$DISPLAY_NUM \
     -PublicIP 127.0.0.1 \
-    -disableBasicAuth \
-    -SecurityTypes None \
+    "${XVNC_SECURITY_ARGS[@]}" \
     -AlwaysShared \
     -geometry "$RESOLUTION" \
     -depth 24 \
@@ -199,6 +227,34 @@ if new_data != raw:
 PY
 }
 
+# Renders the MT5 startup config (login/password/server) from
+# /run/secrets/{mt5_login,mt5_password} + the non-secret MT5_SERVER env var
+# into tmpfs ONLY (WIN_RENDERED_MT5_INI, under the container's Z: drive —
+# never into $MT5_MQL5_FILES, which lives on the persistent named volume).
+# Reads each secret file directly in Python; never echoes/logs a value.
+render_mt5_ini_from_secrets() {
+    local login_file="/run/secrets/mt5_login"
+    local pass_file="/run/secrets/mt5_password"
+    [ -s "$login_file" ] && [ -s "$pass_file" ] || return 1
+    mkdir -p "$GATEWAY_SECRETS_DIR"
+    python3 - "$login_file" "$pass_file" "${MT5_SERVER:-}" "$RENDERED_MT5_INI" <<'PY'
+import sys
+login_file, pass_file, server, out_path = sys.argv[1:5]
+with open(login_file) as f:
+    login = f.readline().strip()
+with open(pass_file) as f:
+    pw = f.readline().strip()
+lines = ["[Common]", f"Login={login}", f"Password={pw}"]
+if server:
+    lines.append(f"Server={server}")
+content = "\r\n".join(lines) + "\r\n"
+with open(out_path, "w", newline="") as f:
+    f.write(content)
+PY
+    chmod 0400 "$RENDERED_MT5_INI"
+    [ -s "$RENDERED_MT5_INI" ]
+}
+
 # === Step 8 — Install Wine Python 3.9.13 32-bit ===
 if [ ! -f "/home/headless/.wine/drive_c/Program Files (x86)/Python39-32/python.exe" ]; then
     step "[8/12] Downloading Wine Python 3.9.13 (32-bit)"
@@ -262,11 +318,11 @@ step "AutoUpdate + Python-API gate reasserted"
 # === Step 11 — Launch MT5 ===
 step "[11/12] Launching MT5"
 mkdir -p "$MT5_MQL5_FILES" 2>/dev/null
-if [ -f "$MT5_MQL5_FILES/mt5.ini" ]; then
-    step "[11/12]   mt5.ini bind-mount detected — launching with /config:"
-    WINEDEBUG=-all wine "$MT5_EXE" /config:"$WIN_MT5_INI" 2>&1 | redact >>"$WINE_LOG" &
+if render_mt5_ini_from_secrets; then
+    step "[11/12]   mt5_login/mt5_password secrets present — launching with /config: (tmpfs-rendered, credentials never logged)"
+    WINEDEBUG=-all wine "$MT5_EXE" /config:"$WIN_RENDERED_MT5_INI" 2>&1 | redact >>"$WINE_LOG" &
 else
-    step "[11/12]   no mt5.ini — launching without credentials"
+    step "[11/12]   no mt5_login/mt5_password secrets — launching without credentials"
     WINEDEBUG=-all wine "$MT5_EXE" >>"$WINE_LOG" 2>&1 &
 fi
 

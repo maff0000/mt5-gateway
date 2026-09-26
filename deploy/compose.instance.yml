@@ -19,7 +19,7 @@
 
 services:
   mt5-gateway:
-    image: mt5-gateway:0.2.0-rc2
+    image: mt5-gateway:0.2.0-rc3
     container_name: ${INSTANCE_NAME}
     restart: "no"
     env_file:
@@ -34,6 +34,12 @@ services:
       - mt5_password
       - vnc_password
       - bridge_token
+    tmpfs:
+      # WO-MT5GW-0003: start.sh renders the MT5 login config and the KasmVNC
+      # VncAuth password file here from the Docker secrets above -- tmpfs
+      # only, never the persistent named volume. mode=0700 restricts it to
+      # the containers own user.
+      - /run/gateway-secrets:mode=0700
     networks:
       - instance-net
     mem_limit: 2048m
