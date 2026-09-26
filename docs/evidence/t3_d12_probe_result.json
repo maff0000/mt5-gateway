@@ -1,0 +1,15 @@
+{
+  "probe": "helm_selfbuild_debian12_t3_credential_readonly",
+  "started_utc": "2026-05-14T09:39:01.226808+00:00",
+  "password_length_chars": 8,
+  "password_printed": false,
+  "initialize_result": false,
+  "initialize_seconds": 20.62,
+  "initialize_last_error": [
+    -10005,
+    "IPC timeout"
+  ],
+  "account_info": null,
+  "identity_gate_passed": false,
+  "finished_utc": "2026-05-14T09:39:21.848647+00:00"
+}
