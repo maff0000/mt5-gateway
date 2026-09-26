@@ -30,6 +30,14 @@ services:
       # containers on this compose project's own network below.
       - "${VNC_BIND}:5901"
     secrets:
+      # Docker Compose (non-Swarm) does NOT support the uid/gid/mode
+      # overrides above -- confirmed via a live "not supported, they will be
+      # ignored" warning during the real WO-MT5GW-0003 Task 1 run. Secrets
+      # are mounted root:root mode 0400 regardless; the container's process
+      # runs as the non-root "headless" user (uid 1000) and cannot read them
+      # directly. Fixed in start.sh instead: headless has passwordless sudo
+      # (see the Dockerfile), so render_vnc_password() and
+      # render_mt5_ini_from_secrets() read the secret files via `sudo`.
       - mt5_login
       - mt5_password
       - vnc_password

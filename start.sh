@@ -55,11 +55,31 @@ fail() { echo "[$(date -u +%FT%TZ)] FAIL $1" | tee -a "$START_LOG" >&2; exit 1; 
 # via a pipe, per vncpasswd's own documented non-interactive usage.
 render_vnc_password() {
     local src="/run/secrets/vnc_password"
-    [ -s "$src" ] || return 1
+    # Docker Compose (non-Swarm) mounts secrets root:root mode 0400, always
+    # -- its uid/gid/mode override syntax is silently ignored on this driver
+    # (confirmed live). headless (this process's user) has passwordless
+    # sudo (see the Dockerfile), so read via that instead of plain cat.
+    sudo test -s "$src" || return 1
     mkdir -p "$GATEWAY_SECRETS_DIR"
-    { cat "$src"; echo; cat "$src"; echo; } | vncpasswd -u headless -w -r "$VNC_PASSWD_FILE" >/dev/null 2>&1
+    # printf normalises to exactly one trailing newline per entry regardless
+    # of whether the secret file itself ends in one -- a raw `cat "$src"; echo`
+    # double-newlines when the file already has a trailing \n, which makes
+    # vncpasswd see a spurious blank third line and report "Passwords don't
+    # match" (found + fixed during the real WO-MT5GW-0003 Task 1 run).
+    { printf "%s\n" "$(sudo cat "$src")"; printf "%s\n" "$(sudo cat "$src")"; } | vncpasswd -u headless -w -r "$VNC_PASSWD_FILE" >/dev/null 2>&1
     [ -s "$VNC_PASSWD_FILE" ]
 }
+
+# The tmpfs mount at $GATEWAY_SECRETS_DIR is created root:root mode 0700 by
+# Docker (its `mode=` tmpfs option only sets mode, not ownership) -- headless
+# (this process's user) has zero access to it at all otherwise. Fix
+# ownership once, up front, via headless's passwordless sudo (see the
+# Dockerfile), rather than sudo-ing every single file op inside it. Found +
+# fixed during the real WO-MT5GW-0003 Task 1 run -- the standalone tests
+# that validated render_vnc_password()/render_mt5_ini_from_secrets() used a
+# /tmp scratch dir and never exercised this real target path.
+sudo mkdir -p "$GATEWAY_SECRETS_DIR"
+sudo chown headless:headless "$GATEWAY_SECRETS_DIR"
 
 # === Step 1 — KasmVNC Xvnc (gmag11-style direct invocation) ===
 mkdir -p ~/.vnc
@@ -235,10 +255,14 @@ PY
 render_mt5_ini_from_secrets() {
     local login_file="/run/secrets/mt5_login"
     local pass_file="/run/secrets/mt5_password"
-    [ -s "$login_file" ] && [ -s "$pass_file" ] || return 1
+    # Same root:root mode-0400 secrets mount as render_vnc_password() above
+    # -- read via sudo, and run the whole interpreter under sudo too so its
+    # own open() calls on the secret paths succeed (not just an existence
+    # check followed by a plain-user open that would still fail).
+    sudo test -s "$login_file" && sudo test -s "$pass_file" || return 1
     mkdir -p "$GATEWAY_SECRETS_DIR"
-    python3 - "$login_file" "$pass_file" "${MT5_SERVER:-}" "$RENDERED_MT5_INI" <<'PY'
-import sys
+    sudo python3 - "$login_file" "$pass_file" "${MT5_SERVER:-}" "$RENDERED_MT5_INI" <<'PY'
+import sys, os
 login_file, pass_file, server, out_path = sys.argv[1:5]
 with open(login_file) as f:
     login = f.readline().strip()
@@ -250,6 +274,7 @@ if server:
 content = "\r\n".join(lines) + "\r\n"
 with open(out_path, "w", newline="") as f:
     f.write(content)
+os.chown(out_path, 1000, 1000)
 PY
     chmod 0400 "$RENDERED_MT5_INI"
     [ -s "$RENDERED_MT5_INI" ]
