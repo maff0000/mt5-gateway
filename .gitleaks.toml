@@ -31,6 +31,20 @@ regex = '''(?i)\b(?:bridge_?token|rpyc_?token)\s*[:=]\s*['"]?([A-Za-z0-9_\-]{12,
 secretGroup = 1
 keywords = ["token"]
 
+[[rules]]
+id = "generic-pw-assignment"
+description = "Short-form password vars (VNC_PW, *_PASSWD, *_PWD) assigned a literal value"
+regex = '''(?i)\b[a-z0-9_]*(?:_pw|_pwd|_passwd|passwd)\s*[:=]\s*['"]?([^\s'"<>#$]{4,})'''
+secretGroup = 1
+keywords = ["_pw", "pwd", "passwd"]
+
+[[rules]]
+id = "mt5-login-in-prose"
+description = "MT5 login number near the word 'login' in prose, asserts or JSON"
+regex = '''(?i)\blogin\b[^\n\d]{0,24}?\b(\d{6,12})\b'''
+secretGroup = 1
+keywords = ["login"]
+
 [allowlist]
 description = "Placeholders in example files"
 regexes = [
