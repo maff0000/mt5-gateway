@@ -149,3 +149,17 @@ Test resources removed and confirmed gone: `MT5_REFDIFF_GMAG11`, `MT5_REFDIFF_HE
 **Unplanned discovery during cleanup verification:** dell-debian runs its own `MT5_Vantage` container (same image, same port pattern `3010→3000`/`18812→18812`, `Up 5 weeks`) — pre-existing, not created by this or any WO-MT5GW-000x work, untouched throughout. Flagged separately to Matt and recorded in fabric (`helm:finding:dell_debian_has_own_mt5_vantage_container:v1`) since it shares a name/port pattern with the container Matt confirmed backs Agent Smith on trinity — real risk of a future cross-host cleanup targeting the wrong one by name alone.
 
 **No image changes made.** No changes merged to `Dockerfile`/`start.sh` from this task — this was diagnostic only, per instruction.
+
+## Scope rule (Matt, 2026-09-26 — overrides all earlier scope statements in this WO)
+
+- Work only on **new** components: the mt5-gateway image, its paper instances, and TRON. Priority order for future work: TRON first, then NEO, then everything else.
+- **No security, firewall, iptables/DOCKER-USER, docker network, or port changes that affect any existing system** on trinity or dell-debian — no host-level network/firewall changes at all. This explicitly supersedes the DOCKER-USER allow-rule proposal floated earlier in this WO's Task 4/5 network write-up — that proposal is withdrawn; new containers instead get isolation from their own compose-project-scoped network only (defined inline in the compose file, never `docker network create`d by hand), and KasmVNC is protected by its own password, not a firewall rule.
+- Existing containers are fully off-limits: no restart, exec, config, or network changes. This explicitly includes dell-debian's `MT5_Vantage` (critical — supplies tick data) and trinity's `MT5_Vantage` (live trading), `MT5_FundedNext`, and `MT5_FTMO_Practice` — except the narrowly-scoped Task 3c read-only probe below.
+- Existing-system security findings (e.g. the R5/R6 RPyC-exposure risks already on file) stay recorded as findings only — no remediation work on them under this WO.
+
+## Risk acceptances (Matt, 2026-09-26)
+
+1. **Root access.** Helm runs as root on dell-debian via a root SSH key originating from trinity. Accepted for **paper accounts only**. Revisit before any new live credentials are placed on dell-debian. dell-debian's pre-existing `MT5_Vantage` container predates this workstream entirely and is explicitly out of scope for it.
+2. **GitHub token.** The broad `gh` token already present on both dell-debian and trinity is accepted for now, strictly scoped to PR operations on `maff0000/mt5-gateway` and `maff0000/tron` (`gh pr create` / `gh pr view` / `gh pr list` / `gh repo view`) — never admin, org, settings, other repos, or deletes. Revisit before live credentials are used in this stack, or before the repos go private at MVP, whichever comes first.
+
+(Supersedes the equivalent, less-precisely-scoped acceptances recorded earlier in this document — the constraints above are the current, binding version.)
