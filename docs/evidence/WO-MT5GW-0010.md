@@ -77,12 +77,9 @@ WO-MT5GW-0002.md` mentions "prior KRONOS/Helm doctrine" in prose but never cites
 | `maff0000/mt5-gateway` | **true** |
 | `maff0000/tron` | **false — still public** |
 
-`mt5-gateway` is private. `tron` is not, as of this check. This WO does **not** change `tron`'s
-visibility — flipping a repo's visibility is a GitHub admin/settings action, outside the standing
-`gh` token risk acceptance's scope (PR operations only on these two repos), and the one narrow
-settings exception already granted and used (WO-MT5GW-0006, adding the two deploy keys) does not
-cover this. Recorded here as an open gap for Matt to close directly (or explicitly extend the risk
-acceptance to cover it) — not silently performed and not silently assumed done.
+**Decision record (Matt, 2026-09-27):** `maff0000/tron` remains PUBLIC by Matt's decision.
+`mt5-gateway` is private. This is a deliberate choice, not an open gap — no visibility change is
+needed or pending for either repo.
 
 **Recorded per Matt's instruction — the standing `gh` token risk acceptance's scope is EXTENDED**:
 acceptable to use the broad token as already scoped (PR operations only on `maff0000/mt5-gateway`

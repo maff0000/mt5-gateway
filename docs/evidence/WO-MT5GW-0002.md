@@ -99,6 +99,8 @@ Confirmed: compose files are correctly excluded from Task 2's import. The instan
 - Push still goes through the repo-scoped deploy key once Matt adds it — the broad token is not used for `git push`.
 - **Revisit trigger:** must be replaced with a scoped fine-grained token before any live broker credentials are used on this host, or before the repos go private at MVP — whichever comes first.
 
+**SUPERSEDED 2026-09-27:** the "before the repos go private" trigger is removed; the acceptance now runs until "before live broker credentials are used" — see WO-MT5GW-0010.md.
+
 ### Correction 3 — Task 3 package differential was not actually established
 
 The Task 3 evidence above states "package version ruled out" after testing `MetaTrader5` `5.0.36` → `5.0.37`. **That conclusion does not hold.** Verified against PyPI directly (`https://pypi.org/pypi/MetaTrader5/json`):
@@ -161,5 +163,7 @@ Test resources removed and confirmed gone: `MT5_REFDIFF_GMAG11`, `MT5_REFDIFF_HE
 
 1. **Root access.** Helm runs as root on dell-debian via a root SSH key originating from trinity. Accepted for **paper accounts only**. Revisit before any new live credentials are placed on dell-debian. dell-debian's pre-existing `MT5_Vantage` container predates this workstream entirely and is explicitly out of scope for it.
 2. **GitHub token.** The broad `gh` token already present on both dell-debian and trinity is accepted for now, strictly scoped to PR operations on `maff0000/mt5-gateway` and `maff0000/tron` (`gh pr create` / `gh pr view` / `gh pr list` / `gh repo view`) — never admin, org, settings, other repos, or deletes. Revisit before live credentials are used in this stack, or before the repos go private at MVP, whichever comes first.
+
+**SUPERSEDED 2026-09-27:** the "before the repos go private" trigger is removed; the acceptance now runs until "before live broker credentials are used" — see WO-MT5GW-0010.md.
 
 (Supersedes the equivalent, less-precisely-scoped acceptances recorded earlier in this document — the constraints above are the current, binding version.)
