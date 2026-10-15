@@ -95,7 +95,7 @@ rewritten or the remote is damaged.
 |---|---|---|
 | Pre-merge bundle | a single-file `git bundle` of the complete pre-merge repository history (all branches and the GitHub pull-request refs): 25 refs, 28 real commits plus 8 GitHub merge refs, no prerequisite objects ("records a complete history"). Named `mt5-gateway-pre-merge-20261015.bundle`, with a `SHA256SUMS` file | maintainer recovery location, see GOAL audit record |
 | Mirror and manifests | a mirror clone, the refs manifest, the live ref listing at that moment, and the preflight and independent-audit reports | maintainer recovery location, see GOAL audit record |
-| `reconcile/pre/*` tags | nine annotated tags, one per pre-merge branch head (`main` plus `WO-MT5GW-0002` to `-0008` and `-0010`), created locally in the maintainer clone. The bundle was made **before** the tags, so the **bundle does not contain the tags** | the maintainer clone, and the recovery location's mirror. Whether they exist on the remote is not asserted here |
+| `reconcile/pre/*` tags | nine annotated tags, one per pre-merge branch head (`main` plus `WO-MT5GW-0002` to `-0008` and `-0010`), created in the maintainer recovery mirror and pushed to the remote on 2026-10-15 (verified via the GitHub API). The bundle was made **before** the tags, so the **bundle does not contain the tags** | the remote repository (`git ls-remote --tags origin 'reconcile/pre/*'`), and the recovery location's mirror |
 
 The tags point at the heads below (public history; the tag names are the stable handles):
 
