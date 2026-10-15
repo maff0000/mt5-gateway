@@ -6,6 +6,8 @@ Original scope at time of authoring (2026-05-13): DESIGN ONLY — no build, no c
 
 This document is historical design record, imported as-is for WO-MT5GW-0001 Task 3. It predates the KasmVNC variant, the `trinity-mt5-image` build actually shipped, and this repo's naming/port conventions — read it as provenance, not as the current spec.
 
+> Corrections and superseded statements: see [ERRATA.md](ERRATA.md) (E5) and [EVIDENCE-INDEX.md](EVIDENCE-INDEX.md). The current documentation starts at [../README.md](../README.md).
+
 ```json
 {
   "wo": "WO-NEO-FTMO-PRACTICE-EXECUTION-RET_CODE-10044-DIAGNOSTIC-0001",

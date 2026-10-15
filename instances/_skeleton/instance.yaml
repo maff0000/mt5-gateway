@@ -1,0 +1,27 @@
+# Non-secret instance configuration. Copy with: tools/mt5ctl new <dir> <instance_name>
+# Every value below is a FAKE placeholder. Credentials never go in this file; they live
+# in the separate secrets directory named under `secrets.dir` (key NAMES documented in
+# docs/TEMPLATE-CONFIG.md). Unknown keys are rejected.
+schema: mt5-instance/1
+instance_name: mt5-example-demo-a1
+broker_label: example
+broker_server: ExampleBroker-Demo      # a server alias, never an address
+environment: DEMO                      # DEMO | LIVE (LIVE is refused by default)
+account_class: demo-unfunded
+# CANDIDATE tag: built later from main; does not exist yet. rc6 is rollback evidence only.
+image: mt5-gateway:CANDIDATE-unbuilt-from-main
+restart: "no"
+network:
+  name: mt5-example-demo-a1-net
+  bind: 127.0.0.1
+ports:
+  operator_ui: none                    # none | integer (published on network.bind only)
+data_volume: mt5-example-demo-a1-data
+limits:
+  memory_mb: 2048
+  cpus: 1.5
+  pids: 512
+timezone: Etc/UTC
+servers_dat: /srv/example/_shared/servers.dat
+secrets:
+  dir: /srv/example/secrets/mt5-example-demo-a1

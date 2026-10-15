@@ -1,0 +1,7 @@
+# Optional overlay: publish the KasmVNC web UI (container port 6901) on a LOOPBACK
+# address only. Added by `mt5ctl render` solely when ports.operator_ui is an integer.
+# lint refuses any bind other than 127.0.0.1 / ::1, so this can never publish 0.0.0.0.
+services:
+  mt5-gateway:
+    ports:
+      - "${OPERATOR_UI_BIND:?}:${OPERATOR_UI_PORT:?}:6901"

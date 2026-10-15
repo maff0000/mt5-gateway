@@ -1,0 +1,427 @@
+#!/usr/bin/env python3
+"""mt5ctl -- minimal, credential-free instance-config tool for mt5-gateway.
+
+    mt5ctl lint   <instance.yaml> [--peers DIR ...] [--skip-fs]
+    mt5ctl render <instance.yaml> [--out DIR] [--no-docker] [--peers DIR ...]
+    mt5ctl new    <dest-dir> <instance_name> [--force]
+
+Stdlib only. instance.yaml is parsed with a deliberately tiny STRICT YAML subset
+(nested maps + scalars + comments) so no third-party YAML dependency is needed;
+anything outside the subset is an error. Nothing here starts a container, contacts
+a broker or reads a secret VALUE (only secret file NAMES and modes are checked).
+"""
+import argparse, json, os, re, shutil, stat, subprocess, sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+SCHEMA_PATH = REPO / "schemas" / "mt5-instance.schema.json"
+COMPOSE = REPO / "deploy" / "compose.instance.yml"
+COMPOSE_UI = REPO / "deploy" / "compose.operator-ui.yml"
+SKELETON = REPO / "instances" / "_skeleton" / "instance.yaml"
+SECRET_KEYS = frozenset({"mt5_login", "mt5_password", "vnc_password"})  # NAMES only
+LIVE_PROVISIONING_ENABLED = False  # DEMO-only template: render/up refuse LIVE regardless of gates
+
+
+# ---------------------------------------------------------------- strict YAML subset
+class ParseError(ValueError):
+    pass
+
+
+def _scalar(tok, ln):
+    if tok == "":
+        raise ParseError(f"line {ln}: empty value (nested maps need children; use quotes for empty string)")
+    if tok[0] in "\"'":
+        if len(tok) < 2 or tok[-1] != tok[0] or tok[0] in tok[1:-1]:
+            raise ParseError(f"line {ln}: bad quoted string")
+        return tok[1:-1]
+    if tok[0] in "[{&*!|>%@`-" and not re.fullmatch(r"-?\d+(\.\d+)?", tok):
+        raise ParseError(f"line {ln}: unsupported YAML construct {tok[0]!r}")
+    if tok in ("true", "false"):
+        return tok == "true"
+    if re.fullmatch(r"-?\d+", tok):
+        return int(tok)
+    if re.fullmatch(r"-?\d+\.\d+", tok):
+        return float(tok)
+    return tok
+
+
+def _strip_comment(s):
+    out, q = [], None
+    for i, c in enumerate(s):
+        if q:
+            if c == q:
+                q = None
+        elif c in "\"'":
+            q = c
+        elif c == "#" and (i == 0 or s[i - 1] in " \t"):
+            break
+        out.append(c)
+    return "".join(out).rstrip()
+
+
+def parse_yaml(text):
+    root = {}
+    stack = [(-1, root)]
+    for ln, raw in enumerate(text.split("\n"), 1):
+        if "\r" in raw:
+            raise ParseError(f"line {ln}: carriage returns are not allowed (use LF line endings)")
+        if "\t" in raw:
+            raise ParseError(f"line {ln}: tabs are not allowed")
+        line = _strip_comment(raw)
+        if not line.strip():
+            continue
+        if line.strip() in ("---", "..."):
+            raise ParseError(f"line {ln}: document markers unsupported")
+        indent = len(line) - len(line.lstrip(" "))
+        if indent % 2:
+            raise ParseError(f"line {ln}: indent must be a multiple of 2")
+        m = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*):(?: +(.*))?", line.strip())
+        if not m:
+            raise ParseError(f"line {ln}: expected 'key: value' (lists/flow/anchors unsupported)")
+        key, val = m.group(1), m.group(2)
+        while stack[-1][0] >= indent:
+            stack.pop()
+        if indent != stack[-1][0] + 2 and not (stack[-1][0] == -1 and indent == 0):
+            raise ParseError(f"line {ln}: unexpected indentation")
+        parent = stack[-1][1]
+        if key in parent:
+            raise ParseError(f"line {ln}: duplicate key {key!r}")
+        if val is None or val == "":
+            parent[key] = {}
+            stack.append((indent, parent[key]))
+        else:
+            parent[key] = _scalar(val.strip(), ln)
+    _reject_empty_maps(root)
+    return root
+
+
+def _reject_empty_maps(d, path=""):
+    for k, v in d.items():
+        if isinstance(v, dict):
+            if not v:
+                raise ParseError(f"key {path}{k}: empty value")
+            _reject_empty_maps(v, f"{path}{k}.")
+
+
+# ------------------------------------------------------------- mini JSON Schema check
+def validate_schema(inst, schema, path="$"):
+    """Subset of JSON Schema used by schemas/mt5-instance.schema.json. Returns [errors]."""
+    errs = []
+    if "const" in schema and inst != schema["const"]:
+        errs.append(f"{path}: must equal {schema['const']!r}")
+    if "enum" in schema and inst not in schema["enum"]:
+        errs.append(f"{path}: must be one of {schema['enum']}")
+    if "oneOf" in schema:
+        ok = sum(1 for s in schema["oneOf"] if not validate_schema(inst, s, path))
+        if ok != 1:
+            errs.append(f"{path}: does not match exactly one allowed form")
+        return errs
+    t = schema.get("type")
+    if t:
+        py = {"string": str, "object": dict, "boolean": bool}.get(t)
+        if t == "integer":
+            good = isinstance(inst, int) and not isinstance(inst, bool)
+        elif t == "number":
+            good = isinstance(inst, (int, float)) and not isinstance(inst, bool)
+        else:
+            good = isinstance(inst, py)
+        if not good:
+            errs.append(f"{path}: must be {t}")
+            return errs
+    if isinstance(inst, str):
+        if "pattern" in schema and not re.search(schema["pattern"], inst):
+            errs.append(f"{path}: value {inst!r} does not match {schema['pattern']}")
+        if "maxLength" in schema and len(inst) > schema["maxLength"]:
+            errs.append(f"{path}: too long")
+    if isinstance(inst, (int, float)) and not isinstance(inst, bool):
+        if "minimum" in schema and inst < schema["minimum"]:
+            errs.append(f"{path}: below minimum {schema['minimum']}")
+        if "maximum" in schema and inst > schema["maximum"]:
+            errs.append(f"{path}: above maximum {schema['maximum']}")
+    if isinstance(inst, dict):
+        props = schema.get("properties", {})
+        for r in schema.get("required", []):
+            if r not in inst:
+                errs.append(f"{path}: missing required key {r!r}")
+        if schema.get("additionalProperties") is False:
+            for k in inst:
+                if k not in props:
+                    errs.append(f"{path}: unknown key {k!r}")
+        for k, v in inst.items():
+            if k in props:
+                errs += validate_schema(v, props[k], f"{path}.{k}")
+    return errs
+
+
+# ------------------------------------------------------------------- derived values
+def load_config(path):
+    path = Path(path)
+    try:
+        cfg = parse_yaml(path.read_text())
+    except (OSError, ParseError) as e:
+        raise ParseError(f"{path}: {e}")
+    return cfg
+
+
+def plan(cfg):
+    """Pure mapping config -> host-visible resource names (used for disjointness)."""
+    ui = cfg["ports"]["operator_ui"]
+    return {
+        "project": cfg["instance_name"],
+        "container": cfg["instance_name"],
+        "network": cfg["network"]["name"],
+        "volume": cfg["data_volume"],
+        "secrets_dir": cfg["secrets"]["dir"],
+        "published": [] if ui == "none" else [f"{cfg['network']['bind']}:{ui}"],
+    }
+
+
+def env_map(cfg, instance_dir, env_file):
+    ui = cfg["ports"]["operator_ui"]
+    e = {
+        "INSTANCE_NAME": cfg["instance_name"], "BROKER": cfg["broker_label"],
+        "ENVIRONMENT": cfg["environment"], "EXPECTED_TRADE_MODE": "DEMO" if cfg["environment"] == "DEMO" else "REAL",
+        "MT5_SERVER": cfg["broker_server"], "LOG_LEVEL": cfg.get("log_level", "INFO"),
+        "IMAGE_REF": cfg["image"], "RESTART_POLICY": cfg.get("restart", "no"),
+        "NETWORK_NAME": cfg["network"]["name"], "DATA_VOLUME": cfg["data_volume"],
+        "MEM_LIMIT_MB": cfg["limits"]["memory_mb"], "CPUS": cfg["limits"]["cpus"],
+        "PIDS_LIMIT": cfg["limits"]["pids"], "TZ": cfg["timezone"],
+        "SERVERS_DAT": cfg["servers_dat"], "SECRETS_DIR": cfg["secrets"]["dir"],
+        "INSTANCE_ENV_FILE": str(env_file),
+    }
+    if ui != "none":
+        e["OPERATOR_UI_BIND"] = f"[{cfg['network']['bind']}]" if ":" in cfg["network"]["bind"] else cfg["network"]["bind"]
+        e["OPERATOR_UI_PORT"] = ui
+    return e
+
+
+# --------------------------------------------------------------------------- lint
+def is_root_owned(st):
+    return st.st_uid == 0
+
+
+def check_live(cfg):
+    errs, env, live = [], cfg.get("environment"), cfg.get("live", {})
+    gated = bool(live.get("enable")) or "capital_gate_marker" in live or bool(live.get("live_capable_build"))
+    if env == "DEMO":
+        if gated:
+            errs.append("DEMO instance must not carry live flags (live.enable / capital_gate_marker / live_capable_build)")
+        return errs
+    if env != "LIVE":
+        return errs
+    if cfg.get("account_class") != "live-capital":
+        errs.append("LIVE requires account_class live-capital")
+    if live.get("enable") is not True:
+        errs.append("LIVE refused: live.enable is not true (default refusal)")
+    if live.get("live_capable_build") is not True or "live-capable" not in cfg.get("image", "").lower():
+        errs.append("LIVE refused: needs live.live_capable_build true AND an image tag containing 'live-capable'")
+    marker = live.get("capital_gate_marker")
+    if not marker:
+        errs.append("LIVE refused: no live.capital_gate_marker")
+    else:
+        try:
+            st = os.lstat(marker)
+            if not stat.S_ISREG(st.st_mode) or st.st_size == 0:
+                errs.append("LIVE refused: capital gate marker must be a non-empty regular file")
+            elif stat.S_IMODE(st.st_mode) != 0o444 or not is_root_owned(st):
+                errs.append("LIVE refused: capital gate marker must be root-owned mode 0444")
+        except OSError:
+            errs.append("LIVE refused: capital gate marker file does not exist")
+    return errs
+
+
+def check_secrets(cfg, config_path, repo=REPO):
+    errs, d = [], Path(cfg["secrets"]["dir"])
+    cfg_dir = Path(config_path).resolve().parent
+    if ".." in d.parts:
+        return ["secrets.dir must not contain '..'"]
+    rd = Path(os.path.realpath(d))
+    if rd == repo or repo in rd.parents:
+        errs.append("secrets.dir must not be inside the repository")
+    if rd == cfg_dir or cfg_dir in rd.parents or rd in cfg_dir.parents:
+        errs.append("secrets.dir must be outside the config directory (and not contain it)")
+    try:
+        st = os.lstat(d)
+    except OSError:
+        return errs + [f"secrets.dir {d} does not exist"]
+    if os.path.abspath(d) != os.path.realpath(d) and stat.S_ISDIR(st.st_mode):
+        errs.append("secrets.dir path contains a symlinked component (parent or itself resolves elsewhere)")
+    try:
+        pst = os.lstat(os.path.dirname(os.path.abspath(d)))
+        if stat.S_ISDIR(pst.st_mode) and pst.st_mode & 0o022 and not pst.st_mode & stat.S_ISVTX:
+            errs.append("secrets.dir parent directory is group- or world-writable")
+    except OSError:
+        pass
+    if not stat.S_ISDIR(st.st_mode):
+        return errs + ["secrets.dir is not a real directory (symlink?)"]
+    if stat.S_IMODE(st.st_mode) != 0o700:
+        errs.append(f"secrets.dir mode is {oct(stat.S_IMODE(st.st_mode))}, must be 0700")
+    names = set()
+    for p in d.iterdir():
+        names.add(p.name)
+        pst = os.lstat(p)
+        if p.name not in SECRET_KEYS:
+            errs.append(f"unexpected entry {p.name!r} in secrets.dir (allowed names: {sorted(SECRET_KEYS)})")
+        elif not stat.S_ISREG(pst.st_mode):
+            errs.append(f"secret {p.name} is not a regular file")
+        elif stat.S_IMODE(pst.st_mode) != 0o600:
+            errs.append(f"secret {p.name} mode is {oct(stat.S_IMODE(pst.st_mode))}, must be 0600")
+        elif pst.st_size == 0:
+            errs.append(f"secret {p.name} is empty")
+        elif pst.st_nlink != 1:
+            errs.append(f"secret {p.name} has {pst.st_nlink} hard links, must be 1")
+    for missing in sorted(SECRET_KEYS - names):
+        errs.append(f"secret {missing} is missing")
+    return errs
+
+
+def check_cross(cfg):
+    errs, n = [], cfg["instance_name"]
+    env, ac = cfg["environment"], cfg["account_class"]
+    if n.split("-")[2] != env.lower():
+        errs.append("instance_name environment segment must equal environment (lower-case)")
+    if n.split("-")[1] != cfg["broker_label"]:
+        errs.append("instance_name broker segment must equal broker_label")
+    if env == "DEMO" and not ac.startswith("demo-"):
+        errs.append("DEMO requires a demo-* account_class")
+    if env == "LIVE" and ac != "live-capital":
+        errs.append("LIVE requires account_class live-capital")
+    for f, v in (("data_volume", cfg["data_volume"]), ("network.name", cfg["network"]["name"])):
+        if not v.startswith(n + "-"):
+            errs.append(f"{f} must start with '<instance_name>-'")
+    if cfg["image"].lower().endswith(":latest") or ("@" not in cfg["image"] and ":" not in cfg["image"].rsplit("/", 1)[-1]):
+        errs.append("image must carry an explicit non-latest tag or digest")
+    if re.search(r"\d+\.\d+\.\d+\.\d+|:\d{2,5}$", cfg["broker_server"]):
+        errs.append("broker_server must be an alias, not an address")
+    if any(re.search(r"(^|/)\.\.(/|$)", cfg[k]) for k in ("servers_dat",)):
+        errs.append("servers_dat must not contain '..'")
+    if str(Path(cfg["servers_dat"]).resolve()).startswith(str(REPO) + os.sep):
+        errs.append("servers_dat must be outside the repository")
+    return errs
+
+
+def _secrets_overlap(a, b):
+    """True if the two secrets dirs are the same or one contains the other, after
+    normalisation (realpath: trailing slash, '//', '/./', symlinked parents)."""
+    ra, rb = Path(os.path.realpath(a)), Path(os.path.realpath(b))
+    return ra == rb or ra in rb.parents or rb in ra.parents
+
+
+def check_peers(cfg, peers):
+    errs, mine = [], plan(cfg)
+    for pth in peers:
+        try:
+            other = plan(load_config(pth))
+        except (ParseError, KeyError, TypeError):
+            errs.append(f"peer {pth}: unreadable/invalid, cannot prove disjointness")
+            continue
+        for k in ("project", "container", "network", "volume"):
+            if mine[k] == other[k]:
+                errs.append(f"collides with peer {pth} on {k}: {mine[k]}")
+        if _secrets_overlap(mine["secrets_dir"], other["secrets_dir"]):
+            errs.append(f"collides with peer {pth} on secrets_dir: equal or nested after path normalisation")
+        for p in set(mine["published"]) & set(other["published"]):
+            errs.append(f"collides with peer {pth} on published port {p}")
+    return errs
+
+
+def lint(path, peers=(), skip_fs=False):
+    """Return (errors, warnings). Never reads secret values."""
+    warns = []
+    try:
+        cfg = load_config(path)
+    except ParseError as e:
+        return [str(e)], warns
+    schema = json.loads(SCHEMA_PATH.read_text())
+    errs = validate_schema(cfg, schema)
+    if errs:
+        return errs, warns
+    errs += check_cross(cfg) + check_live(cfg)
+    if skip_fs:
+        warns.append("secrets directory/file checks SKIPPED by --skip-fs (the LIVE capital-gate marker check still runs)")
+    else:
+        errs += check_secrets(cfg, path)
+    errs += check_peers(cfg, peers)
+    if cfg["environment"] == "LIVE" and not errs:
+        warns.append("this LIVE config passes lint, but `mt5ctl render` still REFUSES LIVE in this DEMO-only template")
+    return errs, warns
+
+
+def sibling_peers(path):
+    me = Path(path).resolve()
+    out = []
+    for d in sorted(me.parent.parent.iterdir()) if me.parent.parent.is_dir() else []:
+        c = d / "instance.yaml"
+        if c.is_file() and c.resolve() != me and not d.name.startswith("_"):
+            out.append(c)
+    return out
+
+
+# -------------------------------------------------------------------- render / new
+def render(path, out=None, peers=(), run_docker=True):
+    errs, _ = lint(path, peers)
+    if errs:
+        return errs, None
+    cfg = load_config(path)
+    if cfg["environment"] != "DEMO" and not LIVE_PROVISIONING_ENABLED:
+        return ["refused: LIVE provisioning is not enabled in this DEMO-only template"], None
+    out = Path(out) if out else Path(path).resolve().parent / "rendered"
+    out.mkdir(parents=True, exist_ok=True)
+    env_file = out / "instance.env"
+    env = env_map(cfg, Path(path).resolve().parent, env_file.resolve())
+    env_file.write_text("".join(f"{k}={v}\n" for k, v in env.items()))
+    os.chmod(env_file, 0o640)
+    files = ["-f", str(COMPOSE)] + (["-f", str(COMPOSE_UI)] if "OPERATOR_UI_PORT" in env else [])
+    cmd = ["docker", "compose", "--env-file", str(env_file), *files, "config", "--format", "json"]
+    if run_docker:
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode:
+            return [f"docker compose config failed: {r.stderr.strip()[:500]}"], None
+        (out / "compose.rendered.json").write_text(r.stdout)
+    return [], {"env_file": str(env_file), "command": " ".join(cmd), "plan": plan(cfg)}
+
+
+def new(dest, name, force=False):
+    if not re.fullmatch(r"mt5-[a-z0-9]{2,24}-demo-[a-z0-9]{1,16}", name):
+        return ["new only creates DEMO instances: name must match mt5-<broker>-demo-<id>"]
+    dest = Path(dest)
+    target = dest / "instance.yaml"
+    if target.is_symlink():
+        return [f"{target} is a symlink; refusing to write through it (even with --force)"]
+    if target.exists() and not force:
+        return [f"{target} exists (use --force)"]
+    broker = name.split("-")[1]
+    text = SKELETON.read_text()
+    text = text.replace("mt5-example-demo-a1", name).replace("broker_label: example", f"broker_label: {broker}")
+    dest.mkdir(parents=True, exist_ok=True)
+    target.write_text(text)
+    return []
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="mt5ctl")
+    sp = ap.add_subparsers(dest="cmd", required=True)
+    a = sp.add_parser("lint"); a.add_argument("config"); a.add_argument("--peers", nargs="*"); a.add_argument("--skip-fs", action="store_true")
+    b = sp.add_parser("render"); b.add_argument("config"); b.add_argument("--out"); b.add_argument("--peers", nargs="*"); b.add_argument("--no-docker", action="store_true")
+    c = sp.add_parser("new"); c.add_argument("dest"); c.add_argument("name"); c.add_argument("--force", action="store_true")
+    args = ap.parse_args(argv)
+    if args.cmd == "lint":
+        peers = args.peers if args.peers is not None else sibling_peers(args.config)
+        errs, warns = lint(args.config, peers, args.skip_fs)
+        for w in warns: print("WARNING", w)
+        for e in errs: print("ERROR", e)
+        print("lint:", "FAIL" if errs else "OK")
+        return 1 if errs else 0
+    if args.cmd == "render":
+        peers = args.peers if args.peers is not None else sibling_peers(args.config)
+        errs, info = render(args.config, args.out, peers, not args.no_docker)
+        for e in errs: print("ERROR", e)
+        if info: print(json.dumps(info, indent=2))
+        return 1 if errs else 0
+    errs = new(args.dest, args.name, args.force)
+    for e in errs: print("ERROR", e)
+    return 1 if errs else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

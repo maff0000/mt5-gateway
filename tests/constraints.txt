@@ -1,0 +1,12 @@
+# Pinned test dependencies (resolved 2026-10-15 for Python 3.12). tools/mt5ctl itself is stdlib-only.
+# Use: python -m pip install -c tests/constraints.txt pytest jsonschema
+attrs==26.1.0
+iniconfig==2.3.1
+jsonschema==4.23.0
+jsonschema-specifications==2025.9.1
+packaging==26.3
+pluggy==1.7.0
+pytest==8.3.4
+referencing==0.37.0
+rpds-py==2026.9.1
+typing_extensions==4.16.0
