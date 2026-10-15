@@ -8,7 +8,7 @@
 # WO-MT5GW-0003 Task 0: reads credentials from Docker secrets
 # (/run/secrets/mt5_login, mt5_password, vnc_password) instead of expecting
 # a pre-rendered mt5.ini bind-mount or an env-var VNC password — see
-# render_mt5_ini_from_secrets() and render_vnc_password() below.
+# render_mt5_ini_from_secrets() and render_kasm_basicauth_password() below.
 
 # === Step 0 — IME hardening ===
 unset XMODIFIERS GTK_IM_MODULE QT_IM_MODULE XIM XIM_PROGRAM
@@ -45,15 +45,27 @@ WINE_PY_BIN="C:\\Program Files (x86)\\Python39-32\\python.exe"
 GATEWAY_SECRETS_DIR="/run/gateway-secrets"
 RENDERED_MT5_INI="$GATEWAY_SECRETS_DIR/mt5.ini"
 WIN_RENDERED_MT5_INI="Z:\\run\\gateway-secrets\\mt5.ini"
-VNC_PASSWD_FILE="$GATEWAY_SECRETS_DIR/vnc.passwd"
+KASM_PASSWD_FILE="$GATEWAY_SECRETS_DIR/kasm.passwd"
+KASM_BASICAUTH_USER="matt"
 
 step() { echo "[$(date -u +%FT%TZ)] $1" | tee -a "$START_LOG"; }
 fail() { echo "[$(date -u +%FT%TZ)] FAIL $1" | tee -a "$START_LOG" >&2; exit 1; }
 
-# Renders the KasmVNC VncAuth password file from /run/secrets/vnc_password.
-# Never prints the value; feeds it to vncpasswd twice (password + confirm)
-# via a pipe, per vncpasswd's own documented non-interactive usage.
-render_vnc_password() {
+# Renders KasmVNC's own Basic-Auth password store (KasmPasswordFile) from
+# /run/secrets/vnc_password. WO-MT5GW-0007 disabled Basic Auth entirely and
+# relied on classic VncAuth/PasswordFile instead -- found not to work at all
+# with this bundled web client: its "Std VNC Auth" handshake hardcodes an
+# empty password and never fires a credentials prompt for that RFB security
+# type (see docs/evidence/WO-MT5GW-0008.md). Basic Auth is the layer the
+# browser's login prompt actually gates, so it's provisioned here instead of
+# disabled. "matt" is a VNC-only Basic-Auth username managed entirely by
+# kasmvncpasswd's own store -- not an OS account, no relation to any Linux
+# user on this container. -w -o grants full read/write/owner control (this
+# is a single-user instance; there is no one else to restrict). Never prints
+# the value; feeds it to kasmvncpasswd twice (password + confirm) via a
+# pipe, per its own documented non-interactive usage -- same double-newline
+# normalisation as render_mt5_ini_from_secrets() needed (WO-MT5GW-0003).
+render_kasm_basicauth_password() {
     local src="/run/secrets/vnc_password"
     # Docker Compose (non-Swarm) mounts secrets root:root mode 0400, always
     # -- its uid/gid/mode override syntax is silently ignored on this driver
@@ -61,13 +73,9 @@ render_vnc_password() {
     # sudo (see the Dockerfile), so read via that instead of plain cat.
     sudo test -s "$src" || return 1
     mkdir -p "$GATEWAY_SECRETS_DIR"
-    # printf normalises to exactly one trailing newline per entry regardless
-    # of whether the secret file itself ends in one -- a raw `cat "$src"; echo`
-    # double-newlines when the file already has a trailing \n, which makes
-    # vncpasswd see a spurious blank third line and report "Passwords don't
-    # match" (found + fixed during the real WO-MT5GW-0003 Task 1 run).
-    { printf "%s\n" "$(sudo cat "$src")"; printf "%s\n" "$(sudo cat "$src")"; } | vncpasswd -u headless -w -r "$VNC_PASSWD_FILE" >/dev/null 2>&1
-    [ -s "$VNC_PASSWD_FILE" ]
+    { printf "%s\n" "$(sudo cat "$src")"; printf "%s\n" "$(sudo cat "$src")"; } | kasmvncpasswd -u "$KASM_BASICAUTH_USER" -w -o "$KASM_PASSWD_FILE" >/dev/null 2>&1
+    chmod 0600 "$KASM_PASSWD_FILE" 2>/dev/null
+    [ -s "$KASM_PASSWD_FILE" ]
 }
 
 # The tmpfs mount at $GATEWAY_SECRETS_DIR is created root:root mode 0700 by
@@ -76,7 +84,7 @@ render_vnc_password() {
 # ownership once, up front, via headless's passwordless sudo (see the
 # Dockerfile), rather than sudo-ing every single file op inside it. Found +
 # fixed during the real WO-MT5GW-0003 Task 1 run -- the standalone tests
-# that validated render_vnc_password()/render_mt5_ini_from_secrets() used a
+# that validated render_kasm_basicauth_password()/render_mt5_ini_from_secrets() used a
 # /tmp scratch dir and never exercised this real target path.
 sudo mkdir -p "$GATEWAY_SECRETS_DIR"
 sudo chown headless:headless "$GATEWAY_SECRETS_DIR"
@@ -99,21 +107,16 @@ sudo chown headless:headless "$GATEWAY_SECRETS_DIR"
 # everything else in the container) before this script runs again.
 rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}"
 mkdir -p ~/.vnc
-if render_vnc_password; then
-    # KasmVNC gates its HTTP/websocket layer with a SEPARATE BasicAuth store
-    # (KasmPasswordFile, default ~/.kasmpasswd, made with kasmvncpasswd) --
-    # distinct from PasswordFile/VncAuth below. That store is never
-    # provisioned here, and DisableBasicAuth defaults to 0 (on), so every
-    # browser connection was rejected at the HTTP layer before VncAuth was
-    # ever reached -- no password could work. Found + fixed WO-MT5GW-0007.
-    # Accepted for dev/LAN/paper only: this relies solely on classic VncAuth
-    # (DES challenge-response, only the first 8 password characters are
-    # significant) with no HTTP-layer auth in front of it. MUST be replaced
-    # before any prod/internet-reachable use with KasmVNC BasicAuth
-    # provisioned from the secret via kasmvncpasswd, over HTTPS, VNC
-    # reachable only through a tunnel.
-    step "[1/12] Starting KasmVNC Xvnc on :$VNC_PORT (websocket :$WEBSOCKET_PORT) — VncAuth enabled from secret, BasicAuth disabled (dev/LAN/paper only)"
-    XVNC_SECURITY_ARGS=(-disableBasicAuth -SecurityTypes VncAuth -PasswordFile "$VNC_PASSWD_FILE")
+if render_kasm_basicauth_password; then
+    # Basic Auth stays ENABLED here (no -disableBasicAuth) -- it's the only
+    # login the browser goes through. RFB-level security is set to None
+    # because access is already gated by Basic Auth before the websocket
+    # upgrade completes; there is nothing left for a second RFB-level
+    # password to protect once that layer has already authenticated the
+    # connection. See docs/evidence/WO-MT5GW-0008.md for why classic VncAuth
+    # (WO-MT5GW-0007's approach) doesn't work with this web client at all.
+    step "[1/12] Starting KasmVNC Xvnc on :$VNC_PORT (websocket :$WEBSOCKET_PORT) — Basic Auth enabled from secret (dev/paper: cleartext HTTP, LAN-only)"
+    XVNC_SECURITY_ARGS=(-KasmPasswordFile "$KASM_PASSWD_FILE" -SecurityTypes None)
 else
     step "[1/12] Starting KasmVNC Xvnc on :$VNC_PORT (websocket :$WEBSOCKET_PORT) — no vnc_password secret, running WITHOUT auth (no-credential test mode only)"
     XVNC_SECURITY_ARGS=(-disableBasicAuth -SecurityTypes None)
@@ -284,7 +287,7 @@ PY
 render_mt5_ini_from_secrets() {
     local login_file="/run/secrets/mt5_login"
     local pass_file="/run/secrets/mt5_password"
-    # Same root:root mode-0400 secrets mount as render_vnc_password() above
+    # Same root:root mode-0400 secrets mount as render_kasm_basicauth_password() above
     # -- read via sudo, and run the whole interpreter under sudo too so its
     # own open() calls on the secret paths succeed (not just an existence
     # check followed by a plain-user open that would still fail).
