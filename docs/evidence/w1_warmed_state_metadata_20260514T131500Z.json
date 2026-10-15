@@ -1,0 +1,14 @@
+{
+  "snapshot_utc": "2026-05-14T13:14:41Z",
+  "warmed_volume_config_dir_listing": [
+    {"name":"accounts.dat","size":4635,"mtime_epoch":1778764350,"sensitive":true},
+    {"name":"agents.dat","size":111388,"mtime_epoch":1778764381,"sha256":"e34c790a910349afa6b49d5405c9c523e97428f6a7a9429e98ce189d093ee7af"},
+    {"name":"common.ini","size":242,"mtime_epoch":1778764349,"sha256":"ed2c3d75961ae6ba6732025301abba5338f6ac3b566959ff288b772478a8bc29"},
+    {"name":"dnsperf.dat","size":388248,"mtime_epoch":1778764354,"sha256":"f31ac41d9b5dd7ee3b81725dc4cd0a9078adbb302bd5a00586eb23044a00293f"},
+    {"name":"hotkeys.ini","size":2,"mtime_epoch":1778764375,"sha256":"b3d510ef04275ca8e698e5b3cbb0ece3949ef9252f0cdc839e9ee347409a2209"},
+    {"name":"settings.ini","size":5908,"mtime_epoch":1778764333,"sha256":"17cba1702ef3164e67014fba1800de0a0ef53050957d2fc967fd46d63518a51b"},
+    {"name":"terminal.ini","size":15268,"mtime_epoch":1778764432,"sha256":"3f853728296320532c2ffa60bfb0d7465c8eef26723d37799508432e5ecc7fa5"},
+    {"name":"terminal.lic","size":36007,"mtime_epoch":1778764332,"sha256":"2aa42813a3364cabfbda1e5bd445dcb21bb6e0d95e24c90117304d625676a6b0"},
+    null
+  ]
+}

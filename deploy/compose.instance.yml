@@ -1,0 +1,63 @@
+# deploy/compose.instance.yml — mt5-gateway paper-instance TEMPLATE (WO-MT5GW-0002 Task 5)
+#
+# No instance values live in this file. Everything instance-specific comes from
+# that instance's own instance.env, passed via --env-file so it is available BOTH
+# for compose's own ${...} substitution (this file) AND injected into the running
+# container via env_file below.
+#
+# Usage (per instance, e.g. mt5-vantage-paper):
+#   INSTANCE_DIR=/srv/mt5-gateway-instances/mt5-vantage-paper
+#   docker compose \
+#     --env-file "$INSTANCE_DIR/instance.env" \
+#     -f deploy/compose.instance.yml \
+#     -p "${INSTANCE_NAME:-mt5-instance}" \
+#     config   # validate only — do not run `up` without Matt's explicit go
+#
+# INSTANCE_DIR must also be exported (or passed via -e) for the secrets file
+# paths below to resolve; it is not itself a key in instance.env because it is
+# a filesystem location, not an application value.
+
+services:
+  mt5-gateway:
+    image: mt5-gateway:0.2.0-rc2
+    container_name: ${INSTANCE_NAME}
+    restart: "no"
+    env_file:
+      - ${INSTANCE_DIR}/instance.env
+    ports:
+      # KasmVNC only. The RPyC/bridge port (18812 inside the container) is
+      # intentionally NOT published here — it stays reachable only from other
+      # containers on this compose project's own network below.
+      - "${VNC_BIND}:5901"
+    secrets:
+      - mt5_login
+      - mt5_password
+      - vnc_password
+      - bridge_token
+    networks:
+      - instance-net
+    mem_limit: 2048m
+    labels:
+      mt5gateway.instance: "${INSTANCE_NAME}"
+      mt5gateway.broker: "${BROKER}"
+      mt5gateway.environment: "${ENVIRONMENT}"
+
+secrets:
+  mt5_login:
+    file: ${INSTANCE_DIR}/secrets/mt5_login
+  mt5_password:
+    file: ${INSTANCE_DIR}/secrets/mt5_password
+  vnc_password:
+    file: ${INSTANCE_DIR}/secrets/vnc_password
+  bridge_token:
+    file: ${INSTANCE_DIR}/secrets/bridge_token
+
+networks:
+  # Compose-project-scoped network, created by `docker compose up` itself when
+  # this project first runs — never `docker network create`d by hand, and
+  # isolated from every other project's containers by default. NOT Compose's
+  # `internal: true` flag: that would also block outbound internet, which
+  # this container needs (broker connection, MT5 first-boot installer/update
+  # downloads). Isolation here means "its own project network," not "no
+  # internet access."
+  instance-net: {}
