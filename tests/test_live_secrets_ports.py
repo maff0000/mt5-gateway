@@ -130,3 +130,16 @@ def test_env_file_has_no_secret_names_or_values(ctl, make_instance, tmp_path):
     cfg = make_instance(); ctl.render(cfg, tmp_path / "o", run_docker=False)
     txt = (tmp_path / "o" / "instance.env").read_text().lower()
     assert "demo-fixture" not in txt and "password=" not in txt and "login=" not in txt
+
+
+def test_live_capable_tag_is_case_insensitive(ctl, make_instance, tmp_path, monkeypatch):
+    errs, _ = _live(ctl, make_instance, tmp_path, monkeypatch, FULL, image="mt5-gateway:CANDIDATE-Live-Capable")
+    assert errs == []
+
+
+def test_live_config_passing_lint_prints_render_refusal_warning(ctl, make_instance, tmp_path, monkeypatch, capsys):
+    _, cfg = _live(ctl, make_instance, tmp_path, monkeypatch, FULL)
+    errs, warns = ctl.lint(cfg)
+    assert errs == [] and any("REFUSES LIVE" in w for w in warns)
+    ctl.main(["lint", str(cfg), "--peers"])
+    assert "WARNING" in capsys.readouterr().out

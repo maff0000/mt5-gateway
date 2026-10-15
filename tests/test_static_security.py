@@ -73,8 +73,10 @@ def test_image_ref_is_parameter_and_rc6_not_relabelled():
 
 
 def test_secret_files_are_gitignored():
-    gi = R(".gitignore")
-    assert "secrets" in gi
+    import subprocess
+    for probe in ("secrets/mt5_password", "instances/x/secrets/mt5_login", "instances/x/rendered/instance.env", ".env", "x/instance.env"):
+        r = subprocess.run(["git", "check-ignore", "-q", "--no-index", probe], cwd=REPO)
+        assert r.returncode == 0, f"{probe} is not ignored by git"
 
 
 def test_allow_list_is_exactly_the_xfails():

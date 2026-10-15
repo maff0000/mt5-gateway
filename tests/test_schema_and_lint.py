@@ -97,3 +97,46 @@ def test_new_creates_demo_only(ctl, tmp_path):
     assert ctl.new(tmp_path / "x", "mt5-vantage-demo-b2")  # exists, no --force
     errs, _ = ctl.lint(tmp_path / "x" / "instance.yaml", skip_fs=True)
     assert errs == []
+
+
+def test_new_refuses_symlinked_instance_yaml_even_with_force(ctl, tmp_path):
+    d = tmp_path / "x"; d.mkdir()
+    victim = tmp_path / "victim.txt"; victim.write_text("keep")
+    os.symlink(victim, d / "instance.yaml")
+    assert any("symlink" in e for e in ctl.new(d, "mt5-vantage-demo-b2", force=True))
+    assert victim.read_text() == "keep"
+    # dangling symlink too
+    (d / "instance.yaml").unlink(); os.symlink(tmp_path / "nope", d / "instance.yaml")
+    assert any("symlink" in e for e in ctl.new(d, "mt5-vantage-demo-b2", force=True))
+    assert not (tmp_path / "nope").exists()
+
+
+@pytest.mark.parametrize("name", ["mt5-a-demo-b2", "mt5-" + "x" * 25 + "-demo-b2", "mt5-vantage-demo-" + "a" * 17])
+def test_new_name_regex_matches_schema(ctl, tmp_path, name):
+    assert ctl.new(tmp_path / "x", name)  # broker 2..24, id 1..16
+
+
+def test_new_generated_file_for_longest_names_lints(ctl, tmp_path):
+    name = "mt5-" + "x" * 24 + "-demo-" + "a" * 16
+    assert ctl.new(tmp_path / "x", name) == []
+
+
+@pytest.mark.parametrize("tag", ["mt5-gateway:LATEST", "mt5-gateway:Latest"])
+def test_latest_rejected_case_insensitively(ctl, make_instance, tag):
+    errs, _ = ctl.lint(make_instance(edit={"image: mt5-gateway:CANDIDATE-unbuilt-from-main": f"image: {tag}"}))
+    assert any("non-latest" in e for e in errs), errs
+
+
+def test_yaml_splits_on_lf_only(ctl):
+    # U+2028 / form feed / vertical tab / U+0085 must not act as line breaks
+    for sep in ("\x0b", "\x0c", "\x85", "\u2028", "\x1c"):
+        d = ctl.parse_yaml(f"a: 1{sep}b: 2\n")
+        assert list(d) == ["a"], (sep, d)  # one line, one key: the separator did not split it
+    with pytest.raises(ctl.ParseError):
+        ctl.parse_yaml("a: 1\r\nb: 2\r\n")
+    assert ctl.parse_yaml("a: 1\nb: 2\n") == {"a": 1, "b": 2}
+
+
+def test_skip_fs_warning_text_is_accurate(ctl):
+    _, warns = ctl.lint(ctl.SKELETON, skip_fs=True)
+    assert any("capital-gate marker check still runs" in w for w in warns)

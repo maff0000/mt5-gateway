@@ -92,3 +92,40 @@ def test_render_without_ui_publishes_nothing(ctl, make_instance, tmp_path):
     assert "ports" not in d["services"]["mt5-gateway"]
     blob = json.dumps(d)
     assert "0.0.0.0" not in blob and "demo-fixture" not in blob
+
+
+# ---- N1: secrets-dir disjointness must hold after path normalisation
+def _sec(cfg):
+    import re
+    return re.search(r"dir: (\S+)", cfg.read_text()).group(1)
+
+
+@pytest.mark.parametrize("variant", ["trailing", "double_slash", "dot", "nested_child", "nested_parent", "symlink_parent"])
+def test_peer_secrets_dir_evasions_rejected(ctl, pair, tmp_path, variant):
+    a, b = pair
+    sa = _sec(a)
+    if variant == "trailing":
+        alias = sa + "/"
+    elif variant == "double_slash":
+        alias = sa.replace("/secrets/", "//secrets//")
+    elif variant == "dot":
+        alias = sa.replace("/secrets/", "/./secrets/./")
+    elif variant == "nested_child":
+        alias = sa + "/child"
+    elif variant == "nested_parent":
+        alias = os.path.dirname(sa)
+    else:
+        link = tmp_path / "linkparent"
+        os.symlink(os.path.dirname(sa), link)
+        alias = str(link / os.path.basename(sa))
+    b.write_text(b.read_text().replace(_sec(b), alias))
+    errs = ctl.check_peers(ctl.load_config(a), [b])
+    assert any("secrets_dir" in e for e in errs), (variant, errs)
+    # also detected from the other side
+    errs = ctl.check_peers(ctl.load_config(b), [a])
+    assert any("secrets_dir" in e for e in errs), (variant, errs)
+
+
+def test_distinct_sibling_secrets_dirs_not_flagged_as_nested(ctl, pair):
+    a, b = pair
+    assert not any("secrets_dir" in e for e in ctl.check_peers(ctl.load_config(a), [b]))

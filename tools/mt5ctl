@@ -62,7 +62,9 @@ def _strip_comment(s):
 def parse_yaml(text):
     root = {}
     stack = [(-1, root)]
-    for ln, raw in enumerate(text.splitlines(), 1):
+    for ln, raw in enumerate(text.split("\n"), 1):
+        if "\r" in raw:
+            raise ParseError(f"line {ln}: carriage returns are not allowed (use LF line endings)")
         if "\t" in raw:
             raise ParseError(f"line {ln}: tabs are not allowed")
         line = _strip_comment(raw)
@@ -211,7 +213,7 @@ def check_live(cfg):
         errs.append("LIVE requires account_class live-capital")
     if live.get("enable") is not True:
         errs.append("LIVE refused: live.enable is not true (default refusal)")
-    if live.get("live_capable_build") is not True or "live-capable" not in cfg.get("image", ""):
+    if live.get("live_capable_build") is not True or "live-capable" not in cfg.get("image", "").lower():
         errs.append("LIVE refused: needs live.live_capable_build true AND an image tag containing 'live-capable'")
     marker = live.get("capital_gate_marker")
     if not marker:
@@ -277,7 +279,7 @@ def check_cross(cfg):
     for f, v in (("data_volume", cfg["data_volume"]), ("network.name", cfg["network"]["name"])):
         if not v.startswith(n + "-"):
             errs.append(f"{f} must start with '<instance_name>-'")
-    if cfg["image"].endswith(":latest") or ("@" not in cfg["image"] and ":" not in cfg["image"].rsplit("/", 1)[-1]):
+    if cfg["image"].lower().endswith(":latest") or ("@" not in cfg["image"] and ":" not in cfg["image"].rsplit("/", 1)[-1]):
         errs.append("image must carry an explicit non-latest tag or digest")
     if re.search(r"\d+\.\d+\.\d+\.\d+|:\d{2,5}$", cfg["broker_server"]):
         errs.append("broker_server must be an alias, not an address")
@@ -288,6 +290,13 @@ def check_cross(cfg):
     return errs
 
 
+def _secrets_overlap(a, b):
+    """True if the two secrets dirs are the same or one contains the other, after
+    normalisation (realpath: trailing slash, '//', '/./', symlinked parents)."""
+    ra, rb = Path(os.path.realpath(a)), Path(os.path.realpath(b))
+    return ra == rb or ra in rb.parents or rb in ra.parents
+
+
 def check_peers(cfg, peers):
     errs, mine = [], plan(cfg)
     for pth in peers:
@@ -296,9 +305,11 @@ def check_peers(cfg, peers):
         except (ParseError, KeyError, TypeError):
             errs.append(f"peer {pth}: unreadable/invalid, cannot prove disjointness")
             continue
-        for k in ("project", "container", "network", "volume", "secrets_dir"):
+        for k in ("project", "container", "network", "volume"):
             if mine[k] == other[k]:
                 errs.append(f"collides with peer {pth} on {k}: {mine[k]}")
+        if _secrets_overlap(mine["secrets_dir"], other["secrets_dir"]):
+            errs.append(f"collides with peer {pth} on secrets_dir: equal or nested after path normalisation")
         for p in set(mine["published"]) & set(other["published"]):
             errs.append(f"collides with peer {pth} on published port {p}")
     return errs
@@ -317,10 +328,12 @@ def lint(path, peers=(), skip_fs=False):
         return errs, warns
     errs += check_cross(cfg) + check_live(cfg)
     if skip_fs:
-        warns.append("filesystem checks (secrets modes, LIVE marker) SKIPPED by --skip-fs")
+        warns.append("secrets directory/file checks SKIPPED by --skip-fs (the LIVE capital-gate marker check still runs)")
     else:
         errs += check_secrets(cfg, path)
     errs += check_peers(cfg, peers)
+    if cfg["environment"] == "LIVE" and not errs:
+        warns.append("this LIVE config passes lint, but `mt5ctl render` still REFUSES LIVE in this DEMO-only template")
     return errs, warns
 
 
@@ -359,10 +372,12 @@ def render(path, out=None, peers=(), run_docker=True):
 
 
 def new(dest, name, force=False):
-    if not re.fullmatch(r"mt5-[a-z0-9]+-demo-[a-z0-9]{1,16}", name):
+    if not re.fullmatch(r"mt5-[a-z0-9]{2,24}-demo-[a-z0-9]{1,16}", name):
         return ["new only creates DEMO instances: name must match mt5-<broker>-demo-<id>"]
     dest = Path(dest)
     target = dest / "instance.yaml"
+    if target.is_symlink():
+        return [f"{target} is a symlink; refusing to write through it (even with --force)"]
     if target.exists() and not force:
         return [f"{target} exists (use --force)"]
     broker = name.split("-")[1]
@@ -383,7 +398,7 @@ def main(argv=None):
     if args.cmd == "lint":
         peers = args.peers if args.peers is not None else sibling_peers(args.config)
         errs, warns = lint(args.config, peers, args.skip_fs)
-        for w in warns: print("WARN", w)
+        for w in warns: print("WARNING", w)
         for e in errs: print("ERROR", e)
         print("lint:", "FAIL" if errs else "OK")
         return 1 if errs else 0
