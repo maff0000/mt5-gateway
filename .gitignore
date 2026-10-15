@@ -40,3 +40,6 @@ docs/evidence/**/*.jpg
 *.swo
 .vscode/
 .idea/
+
+# MT5GW-TEMPLATE-001 generated render output
+rendered/

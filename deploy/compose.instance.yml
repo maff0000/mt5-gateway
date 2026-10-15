@@ -1,83 +1,60 @@
-# deploy/compose.instance.yml — mt5-gateway paper-instance TEMPLATE (WO-MT5GW-0002 Task 5)
+# deploy/compose.instance.yml -- mt5-gateway instance TEMPLATE (WO-MT5GW-0002 Task 5,
+# parametrised by MT5GW-TEMPLATE-001).
 #
-# No instance values live in this file. Everything instance-specific comes from
-# that instance's own instance.env, passed via --env-file so it is available BOTH
-# for compose's own ${...} substitution (this file) AND injected into the running
-# container via env_file below.
+# NO instance values live in this file. Every instance-specific value is a ${VAR}
+# supplied by the generated, NON-SECRET instance.env produced by:
+#     tools/mt5ctl render <instance-dir>/instance.yaml
+# Secrets are never in this file or in instance.env: they are compose file-secrets
+# whose source files live in SECRETS_DIR (outside the repo, dir 0700, files 0600).
 #
-# Usage (per instance, e.g. mt5-vantage-paper):
-#   INSTANCE_DIR=/srv/mt5-gateway-instances/mt5-vantage-paper
-#   docker compose \
-#     --env-file "$INSTANCE_DIR/instance.env" \
-#     -f deploy/compose.instance.yml \
-#     -p "${INSTANCE_NAME:-mt5-instance}" \
-#     config   # validate only — do not run `up` without Matt's explicit go
+# Validate only (never `up` without the owner's explicit go):
+#     tools/mt5ctl render <instance-dir>/instance.yaml     # lints, renders, `docker compose config`
 #
-# INSTANCE_DIR must also be exported (or passed via -e) for the secrets file
-# paths below to resolve; it is not itself a key in instance.env because it is
-# a filesystem location, not an application value.
+# Differences from the pre-template file (behaviour preserved for the default case):
+#   * image:        was hard-coded mt5-gateway:0.2.0-rc6 -> ${IMAGE_REF} (per instance).
+#   * ports:        was always "${VNC_BIND}:6901" -> NO ports here. The operator UI is
+#                   published only via deploy/compose.operator-ui.yml, which mt5ctl adds
+#                   when ports.operator_ui is set (loopback bind enforced by lint).
+#   * network:      was project-scoped `instance-net` -> explicit name ${NETWORK_NAME}.
+#   * volume:       was ${INSTANCE_NAME}-data -> ${DATA_VOLUME} (lint: must start with
+#                   "<instance_name>-"; the default rule yields the same name).
+#   * restart:      was "no" -> ${RESTART_POLICY}, default "no" (unchanged).
+#   * limits:       mem_limit was fixed 2048m -> ${MEM_LIMIT_MB}; cpus/pids_limit added.
+#   * servers.dat:  was a fixed host path -> ${SERVERS_DAT} (outside the repo).
+#   * secrets dir:  was ${INSTANCE_DIR}/secrets -> ${SECRETS_DIR}.
+#   * TZ:           added (${TZ}).
+
+name: ${INSTANCE_NAME:?}
 
 services:
   mt5-gateway:
-    image: mt5-gateway:0.2.0-rc6
-    container_name: ${INSTANCE_NAME}
-    restart: "no"
+    image: ${IMAGE_REF:?}
+    container_name: ${INSTANCE_NAME:?}
+    restart: ${RESTART_POLICY:-no}
     env_file:
-      - ${INSTANCE_DIR}/instance.env
-    ports:
-      # KasmVNC web/websocket port (6901) -- confirmed via WO-MT5GW-0003
-      # Task 1's real run that the raw RFB port (5901, the original choice
-      # here) never actually binds a listener in this image at all (checked
-      # /proc/net/tcp inside a running container: only 6901 and the bridge
-      # port 18812 are listening). The RPyC/bridge port (18812 inside the
-      # container) is intentionally NOT published here -- it stays reachable
-      # only from other containers on this compose project's own network
-      # below.
-      - "${VNC_BIND}:6901"
+      - ${INSTANCE_ENV_FILE:?}
+    # No `ports:` on purpose. The RPyC/bridge port (18812) is never published; it is
+    # reachable only from containers on this instance's own network.
     secrets:
-      # Docker Compose (non-Swarm) does NOT support the uid/gid/mode
-      # overrides above -- confirmed via a live "not supported, they will be
-      # ignored" warning during the real WO-MT5GW-0003 Task 1 run. Secrets
-      # are mounted root:root mode 0400 regardless; the container's process
-      # runs as the non-root "headless" user (uid 1000) and cannot read them
-      # directly. Fixed in start.sh instead: headless has passwordless sudo
-      # (see the Dockerfile), so render_kasm_basicauth_password() and
-      # render_mt5_ini_from_secrets() read the secret files via `sudo`.
-      #
-      # bridge_token removed WO-MT5GW-0010: never wired to anything -- the
-      # RPyC bridge is unauthenticated classic RPyC (SlaveService), and
-      # provisioning a secret that nothing checks is worse than not having
-      # one at all (implies protection that isn't there). See
-      # docs/evidence/WO-MT5GW-0010.md for the accepted risk and what an
-      # authenticated bridge requires.
+      # Compose (non-Swarm) mounts these root:root 0400 regardless of uid/gid/mode
+      # overrides. start.sh reads them via sudo (KNOWN DEFERRED hazard, see
+      # docs/TEMPLATE-CONFIG.md and tests/test_static_security.py).
       - mt5_login
       - mt5_password
       - vnc_password
     volumes:
-      # WO-MT5GW-0006: shared broker-directory seed, read-only, host-only --
-      # NEVER committed to git. Not instance-specific (same seed for every
-      # instance), so this path is a fixed host path rather than an
-      # ${INSTANCE_DIR}-relative one like the secrets above. start.sh copies
-      # this into the terminal's own Config/ on first boot ONLY (see
-      # seed_servers_dat_if_missing() in start.sh) -- later boots never
-      # touch it again, so anything a user finds/adds via "Find your
-      # company" persists across restarts instead of being overwritten.
-      - /srv/mt5-gateway-instances/_shared/servers.dat:/seed/servers.dat:ro
-      # Persistent named volume for the Wine prefix + terminal state (MT5
-      # install, Config/, logs) -- WITHOUT this, every container recreation
-      # is a full fresh MT5 install from scratch (~90-100s) and nothing
-      # survives a restart. Named mt5-<broker>-<env>-data per the instance
-      # naming convention; ${INSTANCE_NAME} already IS mt5-<broker>-<env>.
+      # Shared broker-directory seed, read-only, host-only, never committed.
+      - ${SERVERS_DAT:?}:/seed/servers.dat:ro
+      # Persistent Wine prefix + terminal state.
       - data:/home/headless
     tmpfs:
-      # WO-MT5GW-0003: start.sh renders the MT5 login config and the KasmVNC
-      # VncAuth password file here from the Docker secrets above -- tmpfs
-      # only, never the persistent named volume. mode=0700 restricts it to
-      # the containers own user.
+      # start.sh renders the MT5 login config / VNC password file here (tmpfs only).
       - /run/gateway-secrets:mode=0700
     networks:
       - instance-net
-    mem_limit: 2048m
+    mem_limit: ${MEM_LIMIT_MB:?}m
+    cpus: ${CPUS:?}
+    pids_limit: ${PIDS_LIMIT:?}
     labels:
       mt5gateway.instance: "${INSTANCE_NAME}"
       mt5gateway.broker: "${BROKER}"
@@ -85,26 +62,18 @@ services:
 
 secrets:
   mt5_login:
-    file: ${INSTANCE_DIR}/secrets/mt5_login
+    file: ${SECRETS_DIR:?}/mt5_login
   mt5_password:
-    file: ${INSTANCE_DIR}/secrets/mt5_password
+    file: ${SECRETS_DIR:?}/mt5_password
   vnc_password:
-    file: ${INSTANCE_DIR}/secrets/vnc_password
+    file: ${SECRETS_DIR:?}/vnc_password
 
 volumes:
-  # Persistent per-instance Wine prefix + terminal state. Compose creates
-  # this itself on first `up` (prefixed with the project/instance name,
-  # same convention as the network below) -- never `docker volume create`d
-  # by hand.
   data:
-    name: ${INSTANCE_NAME}-data
+    name: ${DATA_VOLUME:?}
 
 networks:
-  # Compose-project-scoped network, created by `docker compose up` itself when
-  # this project first runs — never `docker network create`d by hand, and
-  # isolated from every other project's containers by default. NOT Compose's
-  # `internal: true` flag: that would also block outbound internet, which
-  # this container needs (broker connection, MT5 first-boot installer/update
-  # downloads). Isolation here means "its own project network," not "no
-  # internet access."
-  instance-net: {}
+  # Named, per-instance bridge network created by compose itself. Not `internal`
+  # (the terminal needs outbound internet for broker + first-boot downloads).
+  instance-net:
+    name: ${NETWORK_NAME:?}
