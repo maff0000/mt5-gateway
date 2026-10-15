@@ -39,6 +39,7 @@ def make_instance(tmp_path, ctl):
         cfg.write_text(text)
         if secrets:
             (base / "secrets").mkdir(exist_ok=True)
+            os.chmod(base / "secrets", 0o755)  # independent of the caller's umask
             sec.mkdir()
             os.chmod(sec, 0o700)
             for k in ctl.SECRET_KEYS:

@@ -26,7 +26,7 @@ def pair(ctl, tmp_path, make_instance):
     def mk2():
         text = ctl.SKELETON.read_text().replace("mt5-example-demo-a1", "mt5-example-demo-b2")
         cfgdir = sub / "cfg" / "mt5-example-demo-b2"; cfgdir.mkdir(parents=True)
-        sec = sub / "secrets" / "mt5-example-demo-b2"; sec.mkdir(parents=True); os.chmod(sec, 0o700)
+        sec = sub / "secrets" / "mt5-example-demo-b2"; sec.mkdir(parents=True); os.chmod(sec.parent, 0o755); os.chmod(sec, 0o700)
         text = text.replace("/srv/example/secrets/mt5-example-demo-b2", str(sec)).replace("operator_ui: none", "operator_ui: 16902")
         (cfgdir / "instance.yaml").write_text(text)
         for k in ctl.SECRET_KEYS:
