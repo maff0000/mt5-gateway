@@ -19,21 +19,40 @@
 
 services:
   mt5-gateway:
-    image: mt5-gateway:0.2.0-rc2
+    image: mt5-gateway:0.2.0-rc3
     container_name: ${INSTANCE_NAME}
     restart: "no"
     env_file:
       - ${INSTANCE_DIR}/instance.env
     ports:
-      # KasmVNC only. The RPyC/bridge port (18812 inside the container) is
-      # intentionally NOT published here — it stays reachable only from other
-      # containers on this compose project's own network below.
-      - "${VNC_BIND}:5901"
+      # KasmVNC web/websocket port (6901) -- confirmed via WO-MT5GW-0003
+      # Task 1's real run that the raw RFB port (5901, the original choice
+      # here) never actually binds a listener in this image at all (checked
+      # /proc/net/tcp inside a running container: only 6901 and the bridge
+      # port 18812 are listening). The RPyC/bridge port (18812 inside the
+      # container) is intentionally NOT published here -- it stays reachable
+      # only from other containers on this compose project's own network
+      # below.
+      - "${VNC_BIND}:6901"
     secrets:
+      # Docker Compose (non-Swarm) does NOT support the uid/gid/mode
+      # overrides above -- confirmed via a live "not supported, they will be
+      # ignored" warning during the real WO-MT5GW-0003 Task 1 run. Secrets
+      # are mounted root:root mode 0400 regardless; the container's process
+      # runs as the non-root "headless" user (uid 1000) and cannot read them
+      # directly. Fixed in start.sh instead: headless has passwordless sudo
+      # (see the Dockerfile), so render_vnc_password() and
+      # render_mt5_ini_from_secrets() read the secret files via `sudo`.
       - mt5_login
       - mt5_password
       - vnc_password
       - bridge_token
+    tmpfs:
+      # WO-MT5GW-0003: start.sh renders the MT5 login config and the KasmVNC
+      # VncAuth password file here from the Docker secrets above -- tmpfs
+      # only, never the persistent named volume. mode=0700 restricts it to
+      # the containers own user.
+      - /run/gateway-secrets:mode=0700
     networks:
       - instance-net
     mem_limit: 2048m
