@@ -19,7 +19,7 @@
 
 services:
   mt5-gateway:
-    image: mt5-gateway:0.2.0-rc4
+    image: mt5-gateway:0.2.0-rc5
     container_name: ${INSTANCE_NAME}
     restart: "no"
     env_file:

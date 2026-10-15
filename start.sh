@@ -100,8 +100,20 @@ sudo chown headless:headless "$GATEWAY_SECRETS_DIR"
 rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}"
 mkdir -p ~/.vnc
 if render_vnc_password; then
-    step "[1/12] Starting KasmVNC Xvnc on :$VNC_PORT (websocket :$WEBSOCKET_PORT) — VncAuth enabled from secret"
-    XVNC_SECURITY_ARGS=(-SecurityTypes VncAuth -PasswordFile "$VNC_PASSWD_FILE")
+    # KasmVNC gates its HTTP/websocket layer with a SEPARATE BasicAuth store
+    # (KasmPasswordFile, default ~/.kasmpasswd, made with kasmvncpasswd) --
+    # distinct from PasswordFile/VncAuth below. That store is never
+    # provisioned here, and DisableBasicAuth defaults to 0 (on), so every
+    # browser connection was rejected at the HTTP layer before VncAuth was
+    # ever reached -- no password could work. Found + fixed WO-MT5GW-0007.
+    # Accepted for dev/LAN/paper only: this relies solely on classic VncAuth
+    # (DES challenge-response, only the first 8 password characters are
+    # significant) with no HTTP-layer auth in front of it. MUST be replaced
+    # before any prod/internet-reachable use with KasmVNC BasicAuth
+    # provisioned from the secret via kasmvncpasswd, over HTTPS, VNC
+    # reachable only through a tunnel.
+    step "[1/12] Starting KasmVNC Xvnc on :$VNC_PORT (websocket :$WEBSOCKET_PORT) — VncAuth enabled from secret, BasicAuth disabled (dev/LAN/paper only)"
+    XVNC_SECURITY_ARGS=(-disableBasicAuth -SecurityTypes VncAuth -PasswordFile "$VNC_PASSWD_FILE")
 else
     step "[1/12] Starting KasmVNC Xvnc on :$VNC_PORT (websocket :$WEBSOCKET_PORT) — no vnc_password secret, running WITHOUT auth (no-credential test mode only)"
     XVNC_SECURITY_ARGS=(-disableBasicAuth -SecurityTypes None)
