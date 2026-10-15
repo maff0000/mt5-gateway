@@ -143,3 +143,23 @@ def test_live_config_passing_lint_prints_render_refusal_warning(ctl, make_instan
     assert errs == [] and any("REFUSES LIVE" in w for w in warns)
     ctl.main(["lint", str(cfg), "--peers"])
     assert "WARNING" in capsys.readouterr().out
+
+
+# ---- F2: parent path checks
+def test_symlinked_parent_component_rejected(ctl, make_instance, tmp_path):
+    cfg = make_instance(); d = sec_dir(cfg, ctl)
+    link = tmp_path / "alias"; os.symlink(os.path.dirname(d), link)
+    cfg.write_text(cfg.read_text().replace(d, str(link / os.path.basename(d))))
+    assert any("symlinked component" in e for e in ctl.lint(cfg)[0])
+
+
+@pytest.mark.parametrize("mode", [0o770, 0o757, 0o777])
+def test_writable_parent_rejected(ctl, make_instance, mode):
+    cfg = make_instance(); os.chmod(os.path.dirname(sec_dir(cfg, ctl)), mode)
+    assert any("parent directory is group- or world-writable" in e for e in ctl.lint(cfg)[0])
+
+
+def test_hard_linked_secret_rejected(ctl, make_instance, tmp_path):
+    cfg = make_instance(); d = sec_dir(cfg, ctl)
+    os.link(os.path.join(d, "mt5_login"), tmp_path / "other_link")
+    assert any("hard links" in e for e in ctl.lint(cfg)[0])

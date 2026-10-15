@@ -244,6 +244,14 @@ def check_secrets(cfg, config_path, repo=REPO):
         st = os.lstat(d)
     except OSError:
         return errs + [f"secrets.dir {d} does not exist"]
+    if os.path.abspath(d) != os.path.realpath(d) and stat.S_ISDIR(st.st_mode):
+        errs.append("secrets.dir path contains a symlinked component (parent or itself resolves elsewhere)")
+    try:
+        pst = os.lstat(os.path.dirname(os.path.abspath(d)))
+        if stat.S_ISDIR(pst.st_mode) and pst.st_mode & 0o022 and not pst.st_mode & stat.S_ISVTX:
+            errs.append("secrets.dir parent directory is group- or world-writable")
+    except OSError:
+        pass
     if not stat.S_ISDIR(st.st_mode):
         return errs + ["secrets.dir is not a real directory (symlink?)"]
     if stat.S_IMODE(st.st_mode) != 0o700:
@@ -260,6 +268,8 @@ def check_secrets(cfg, config_path, repo=REPO):
             errs.append(f"secret {p.name} mode is {oct(stat.S_IMODE(pst.st_mode))}, must be 0600")
         elif pst.st_size == 0:
             errs.append(f"secret {p.name} is empty")
+        elif pst.st_nlink != 1:
+            errs.append(f"secret {p.name} has {pst.st_nlink} hard links, must be 1")
     for missing in sorted(SECRET_KEYS - names):
         errs.append(f"secret {missing} is missing")
     return errs

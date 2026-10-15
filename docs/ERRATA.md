@@ -5,13 +5,13 @@ Dated corrections to statements in this repository. The historical records under
 be a form of evidence tampering. Corrections live here and are linked from
 [EVIDENCE-INDEX.md](EVIDENCE-INDEX.md).
 
-Entry dates are the date the erratum was written. Source of the findings: the independent audit of the
+Entry dates are the date the erratum was written. This file has seven entries, E1 to E7. Source of the findings: the independent audit of the
 pull-request consolidation (2026-10-15, GOAL audit record) and a re-read of the code for this
 documentation set.
 
 ## 2026-10-15
 
-### E1. The repository is PUBLIC, not private (audit finding F2)
+### E1. The repository is PUBLIC, not private (consolidation audit finding F2)
 
 Affected: `docs/evidence/WO-MT5GW-0010.md` section 4 ("Visibility-change record") and the text of pull
 request #8.

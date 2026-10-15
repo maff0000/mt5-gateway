@@ -86,7 +86,10 @@ or the bridge**: in particular nothing asserts the trade mode at runtime (see
 `/run/secrets/`, so no application source changed. (The design doc proposed one `mt5.secrets` file; that
 needs an entrypoint change and is deferred.) Lint checks names, types, modes and emptiness only; values
 are never read, printed, rendered into `instance.env`, or placed in compose. Lint does not check file
-ownership. `secrets.dir` must not contain `..`, must not be inside the repository, and must not be the
+ownership of the secret files. `secrets.dir` itself must be a real directory and its path must not
+contain a symlinked component (checked as `abspath` equal to `realpath`), its immediate parent directory must
+not be group- or world-writable (unless sticky), and each secret file must have exactly one hard link
+(finding F2). The parent's owner is not checked. `secrets.dir` must not contain `..`, must not be inside the repository, and must not be the
 instance's config directory, inside it, or contain it. A missing directory is an error. Providing and
 using them: [OPERATOR-GUIDE.md](OPERATOR-GUIDE.md) section 4.
 
@@ -128,7 +131,9 @@ account is DEMO.
 
 ## 7. Examples (fake values)
 
-Minimal valid DEMO config (the skeleton, `instances/_skeleton/instance.yaml`, with an operator UI):
+Illustrative DEMO config: the skeleton (`instances/_skeleton/instance.yaml`) with two deliberate differences, an
+example image tag and an operator UI port. The skeleton itself uses the placeholder tag
+`mt5-gateway:CANDIDATE-unbuilt-from-main` and `operator_ui: none`:
 
 ```yaml
 schema: mt5-instance/1
