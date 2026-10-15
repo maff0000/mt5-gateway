@@ -87,6 +87,17 @@ sudo chown headless:headless "$GATEWAY_SECRETS_DIR"
 # (index.html + JS), so a plain browser/curl GET gets an empty HTTP reply.
 # Found live during WO-MT5GW-0005's Config-diff handoff: the port fix
 # (5901->6901, WO-MT5GW-0003) was necessary but not sufficient on its own.
+#
+# Clear stale X11 lock/socket files before launching: WO-MT5GW-0006 added a
+# persistent named volume for /home/headless, but /tmp is still the
+# container's own ephemeral layer -- `docker restart` (as opposed to a full
+# recreate) does NOT clear it, so a lock file from the PREVIOUS run of this
+# same container is still sitting there and Xvnc refuses to start ("Server
+# is already active for display 1"). Found live testing WO-MT5GW-0006 Task
+# 3d (the restart-and-repeat step) -- safe to always remove: if Xvnc is
+# genuinely still running, `docker restart` already killed it (and
+# everything else in the container) before this script runs again.
+rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}"
 mkdir -p ~/.vnc
 if render_vnc_password; then
     step "[1/12] Starting KasmVNC Xvnc on :$VNC_PORT (websocket :$WEBSOCKET_PORT) — VncAuth enabled from secret"
@@ -345,6 +356,39 @@ reset_offscreen_dialogs
 step "Pre-seeding/reasserting [Common] AutoUpdate + [Experts] Api/AllowDllImport gate"
 preseed_experts_and_autoupdate
 step "AutoUpdate + Python-API gate reasserted"
+
+# === Step 10.6 — Seed the broker directory (servers.dat), FIRST START ONLY ===
+# WO-MT5GW-0006: a fresh MT5 install's own default servers.dat only contains
+# MetaQuotes' own demo servers -- boutique/prop-firm brokers (confirmed:
+# Vantage, FTMO) are simply absent, and the terminal has no way to resolve
+# their server names without this file (this is a real, live-verified
+# finding, not a Wine/IPC bug -- see docs/evidence/WO-MT5GW-0005.md and
+# WO-MT5GW-0006.md). /seed/servers.dat is a read-only bind mount of the
+# shared, pre-merged directory (see compose.instance.yml). This only ever
+# runs on a volume's first boot -- once the terminal has its own
+# servers.dat (ours or one it wrote itself), it is NEVER touched again, so
+# any brokers a user finds/adds later via Find your company are preserved
+# across restarts.
+seed_servers_dat_if_missing() {
+    local target="$MT5_DIR/Config/servers.dat"
+    local seed="/seed/servers.dat"
+    [ -f "$target" ] && return 0
+    [ -s "$seed" ] || return 0
+    mkdir -p "$MT5_DIR/Config"
+    cp "$seed" "$target"
+    chmod 0644 "$target"
+    return 0
+}
+if [ -f "$MT5_DIR/Config/servers.dat" ]; then
+    step "Broker directory (servers.dat) already present -- not touching it"
+else
+    seed_servers_dat_if_missing
+    if [ -f "$MT5_DIR/Config/servers.dat" ]; then
+        step "Seeded broker directory (servers.dat) from shared seed (first start only)"
+    else
+        step "No shared seed available -- terminal will use its own default broker directory"
+    fi
+fi
 
 # === Step 11 — Launch MT5 ===
 step "[11/12] Launching MT5"
