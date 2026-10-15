@@ -29,7 +29,7 @@ not a recreate, and `start.sh` truncates all three at every start.
 | `peer ...: unreadable/invalid, cannot prove disjointness` | a sibling directory with a broken `instance.yaml` | lint that file | fix or move it; directories starting with `_` are ignored |
 | LIVE errors, `refused: LIVE provisioning is not enabled` | by design; `render` refuses LIVE always | n/a | do not use LIVE with this template |
 | `docker compose config failed: ...` from `render` | Docker or the Compose plugin missing/failing, or a rendering error | run the printed compose command by hand; or use `render --no-docker` to confirm lint passes | install the Compose plugin; the message tail is passed through (first 500 characters) |
-| `WARN filesystem checks ... SKIPPED by --skip-fs` | expected with `--skip-fs` | n/a | do not use `--skip-fs` for a real instance. The LIVE marker check still runs (see CONFIG-REFERENCE section 6) |
+| `WARNING secrets directory/file checks SKIPPED by --skip-fs ...` | expected with `--skip-fs` | n/a | do not use `--skip-fs` for a real instance. The LIVE marker check still runs (see CONFIG-REFERENCE section 6) |
 
 ## B. Compose and Docker
 

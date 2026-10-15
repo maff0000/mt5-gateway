@@ -47,6 +47,12 @@ remains reachable:
 | Redacted | commit `fbcd433` (in pull request #8) |
 | Exposure window | the repository has been public since 2026-09-26 |
 | Sensitivity (audit ruling) | low: broker server endpoints, no credential, no account identifier |
+| Still holding the unredacted blob | the remote branches for WO-MT5GW-0006 to 0008 and their `reconcile/pre/*` tags (audit finding F13) |
+
+Merging this work does not remove the blob: the remote branches for WO-MT5GW-0006, 0007 and 0008 and
+their `reconcile/pre/WO-MT5GW-0006` to `-0008` tags still hold the unredacted blob, and so do the GitHub
+pull refs. Only deleting those refs (and a history rewrite plus GitHub support purge of cached views)
+would change that; none of that is done or decided.
 
 Decision (accepted and recorded, option A of the audit): history is **not rewritten**. Rewriting would
 invalidate every commit hash and the recovery tags and could not remove copies already cloned or cached.
@@ -98,8 +104,9 @@ These were reasonable at the time and are recorded as superseded in the index, n
 
 ### E7. Documentation versus code, found while preparing this set
 
-- The `--skip-fs` warning text claims the LIVE marker check is skipped; the code still runs it
-  ([CONFIG-REFERENCE.md](CONFIG-REFERENCE.md) section 6). Behaviour is stricter than the message.
+- The `--skip-fs` warning text claimed the LIVE marker check is skipped; the code still runs it
+  ([CONFIG-REFERENCE.md](CONFIG-REFERENCE.md) section 6). Behaviour was stricter than the message. The
+  warning text was corrected in MT5GW-AUDIT-FIX (finding F15).
 - The `start.sh` ready banner prints "VNC: localhost:5901", but no listener is bound on that port in
   this image (WO-MT5GW-0003), and the Dockerfile still `EXPOSE`s 5901.
 - `LOG_LEVEL`, `EXPECTED_TRADE_MODE`, `BROKER` and `ENVIRONMENT` reach the container environment but

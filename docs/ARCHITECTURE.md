@@ -91,11 +91,12 @@ ASCII fallback:
 | Boundary | Exposure | Protection | Residual risk |
 |---|---|---|---|
 | Host root and Docker access | full access to container, volume, secrets | host access control (outside this repo) | anyone with Docker access owns the instance |
-| Browser UI | optional host port on a loopback address only (lint enforces) | Basic Auth, cleartext HTTP; use a tunnel | Basic Auth password crosses loopback/tunnel in cleartext; **fails open** if the secret is missing (H2). One pre-template instance was found bound to a LAN interface address instead of loopback (see KNOWN-LIMITATIONS) |
-| Bridge port 18812 | never published. Reachable by any container on the instance network and by host root via the Docker bridge | network isolation only | unauthenticated arbitrary code execution (H3); with NOPASSWD sudo (H1) and root-readable secrets, reaching the bridge means credential access. The network is not `internal`, so a compromised container also has outbound internet |
+| Browser UI | optional host port on a loopback address only (lint enforces) | Basic Auth, cleartext HTTP; use a tunnel | Basic Auth password crosses loopback/tunnel in cleartext; **fails open** if the secret is missing (H2). An existing, pre-template instance was reported by the maintainers to be bound to a non-loopback address (not re-verified here; see KNOWN-LIMITATIONS). Xvnc inside the container listens on all interfaces, so any peer container on the instance network can reach the UI port regardless of the host publish address |
+| Bridge port 18812 | never published by the template. Reachable by any container on the instance network and by host root via the Docker bridge. The `Dockerfile` has `EXPOSE 18812`, so `docker run -P` (or an operator-added override) would publish the bridge on a random host port | network isolation only | unauthenticated arbitrary code execution (H3); with NOPASSWD sudo (H1) and root-readable secrets, reaching the bridge means credential access. The network is not `internal`, so a compromised container also has outbound internet |
 | Container to internet | outbound for the broker, first-boot downloads (MetaQuotes, python.org, PyPI) | none | non-hermetic first boot |
 | Secrets in the container | file secrets root:root 0400; rendered config on a tmpfs owned by `headless`, mode 0400 | not on the persistent volume | readable via `sudo`, and through the bridge |
-| Terminal state | persistent volume; `accounts.dat` inside it is world-readable (mode 0644) in the existing instance | volume is not shared | binary account metadata, contents not examined |
+| Terminal state | persistent volume; `accounts.dat` inside it was reported (maintainers, not re-verified here) to be world-readable (mode 0644) on an existing instance | volume is not shared | binary account metadata, contents not examined |
+| Container hardening | `cap_drop`, `no-new-privileges`, `read_only` and log rotation are **not** set in the template; default Docker capabilities and unbounded json-file logs apply. The new `cpus` and `pids_limit` limits are untested under Wine/MetaTrader | resource limits `mem_limit`, `cpus`, `pids_limit` only | a container escape or fork/CPU starvation has fewer barriers than a hardened profile; limit values may starve the terminal |
 | Terminal's own listeners | the terminal logs a local "MCP started" listener at each launch; its bind class was not determined | not published | uncharacterised (GOAL verification item 19) |
 
 Log redaction: `start.sh` pipes only the credentialed terminal launch through a `sed` filter that masks
@@ -156,6 +157,5 @@ to the bridge**; this is also the maintainers' recorded position (GOAL verificat
 ## 4. Related decisions
 
 - ADR-MT5-001: reuse the container, replace the bridge (accepted, 2026-10-12).
-- ADR-MT5-002: a separate legacy live-flagged executor is a P0 operational risk. It is out of scope
-  here and nothing in this repository may depend on it. These records live in the maintainers' GOAL
-  repository.
+- ADR-MT5-002: legacy services outside this repository are tracked in the maintainers' private record.
+  They are out of scope here and nothing in this repository may depend on them.

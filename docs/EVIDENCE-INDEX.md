@@ -190,8 +190,9 @@ Statements that no longer match the build:
 - Interactive browser login after WO-MT5GW-0008: no record.
 - Tick freshness, order lifecycle, restart under load, two instances side by side, and the image
   built from `main`: no evidence.
-- The maintainers' read-only host-side verification (GOAL audit record, 2026-10-15) adds: the terminal
-  journals show DEMO authorisation, the container ran healthy for about 19 days with no restarts, only the
-  UI port was published (to a LAN interface address, not loopback), the bridge port had no host
-  publication, secrets modes were correct. It made no broker call and does not prove the stored password
-  is a trading password or who owns the account.
+- **REPORTED by the maintainers; evidence is not in this repository; not re-verified here:** a read-only
+  host-side check (2026-10-15) of an existing instance reported that the terminal journals show DEMO
+  authorisation, the container ran healthy for about 19 days with no restarts, only the UI port was
+  published (to a non-loopback interface address), the bridge port had no host publication, and secrets
+  modes were correct. It made no broker call and would not prove that the stored password is a trading
+  password or who owns the account.

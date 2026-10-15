@@ -28,11 +28,13 @@ Proven (historical work orders, evidence in [docs/EVIDENCE-INDEX.md](docs/EVIDEN
   credentials, 200 with the right one, 401 with a wrong one, checked over HTTP against that
   deployment (WO-MT5GW-0008). The result of an interactive browser login test is not recorded in this
   repository.
-- A read-only, host-side verification in the maintainers' GOAL repository (2026-10-15) found the
-  existing DEMO instance's terminal journals show DEMO authorisation, with no broker call made.
 - The configuration contract (schema, lint, render, LIVE refusal, two-instance disjointness) is
   covered by the test suite (`python3 -m pytest -q tests`: all pass, plus 3 strict expected failures that
   pin known hazards, and a docs test for links and addresses).
+
+Reported by the maintainers, **not re-verified here** (the evidence is not in this repository): a
+read-only host-side check on 2026-10-15 of an existing instance (DEMO authorisation in the terminal
+journals, container uptime, which UI address was bound, file modes). Treat it as a claim, not as proof.
 
 Not proven:
 
@@ -139,4 +141,8 @@ A second DEMO account is a second config dir and a second secrets dir; no source
 | `.gitleaks.toml`, `scripts/hooks/pre-commit` | Secret scanning rules and hook; this is a public repository |
 
 Public repository rules: no real broker server addresses, internal IPs, account numbers, credentials
-or host-specific paths in committed files. Documentation uses placeholders and RFC 5737 example ranges.
+or host-specific paths in committed files outside `docs/evidence/`. Documentation uses placeholders and
+RFC 5737 example ranges. `docs/evidence/` is preserved as a historical record (never edited) and
+**does** contain internal addresses and some secret-length and user details, as noted in the
+maintainers' audit; see [docs/ERRATA.md](docs/ERRATA.md) and
+[docs/KNOWN-LIMITATIONS.md](docs/KNOWN-LIMITATIONS.md). Do not copy values from it into other files.

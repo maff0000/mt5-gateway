@@ -112,7 +112,8 @@ The tags point at the heads below (public history; the tag names are the stable 
 | `reconcile/pre/WO-MT5GW-0010` | `720a2e7b1d11c38990defb92e36aa73100a51840` |
 
 Note that the pre-merge history includes the commit that contains two broker server addresses
-(see [ERRATA.md](ERRATA.md) E2). Restoring it restores them; the repository is public and this was
+(see [ERRATA.md](ERRATA.md) E2). The remote branches for WO-MT5GW-0006 to 0008 and their
+`reconcile/pre/*` tags still hold the unredacted blob today, merged or not. Restoring it restores them; the repository is public and this was
 accepted and recorded.
 
 ### Verify the bundle

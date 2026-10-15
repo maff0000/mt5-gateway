@@ -29,9 +29,9 @@ makes the suite demand an update.
 | **Unpinned installers at first boot.** The MT5 installer (always the current build), the Wine Python installer, and `pip install --upgrade pip` carry no checksum. `MetaTrader5==5.0.36`, `rpyc==5.2.3`, `numpy<2` are pinned but newer MetaTrader5 wheels are 64-bit only | A new first boot may get a different terminal build; supply-chain integrity is not verified; AutoUpdate=0 did not suppress the LiveUpdate dialog in the evidence | Increment 3 (pinned artefact lock). Terminal build pinning has no assigned design yet |
 | **No container-level proof of the new template.** Only lint, render and `docker compose config` are tested. The earlier credentialed success (WO-MT5GW-0006) used the pre-template compose file and `rc6` | The template may have defects that only a container reveals; two instances have never run side by side | Increments 3 and 6 |
 | **The running image `0.2.0-rc6` is not the tip.** It matches WO-MT5GW-0008, not WO-MT5GW-0010, and its label says `rc2` | Cannot be used as evidence for the tip. Kept only as rollback evidence (ERRATA E3) | Build a new candidate from `main` (increment 3) |
-| **The browser UI is cleartext HTTP with Basic Auth** and a fixed user name `matt` in `start.sh` | Credentials cross loopback or a tunnel unencrypted; fine only for loopback/tunnel use | No increment assigned; TLS was named as a pre-production requirement in WO-MT5GW-0008 |
-| **The UI is bound to a LAN interface address on an existing instance** (created before the template, which allows loopback only) | That instance's UI is reachable from the LAN behind Basic Auth over plain HTTP | Recreate it from the template with a loopback bind; the maintainers recorded this as a separate approved change |
-| **`accounts.dat` is world-readable (mode 0644) inside a terminal volume** (the terminal creates it; observed on an existing instance) | Any process in the container can read the terminal's binary account metadata; contents not examined | No increment assigned; needs investigation of how the terminal creates the file |
+| **The browser UI is cleartext HTTP with Basic Auth** and a fixed, non-configurable user name in `start.sh` | Credentials cross loopback or a tunnel unencrypted; fine only for loopback/tunnel use | No increment assigned; TLS was named as a pre-production requirement in WO-MT5GW-0008 |
+| **An existing instance (created before the template) reportedly publishes its UI on a non-loopback address.** REPORTED by the maintainers; evidence is not in this repository; not re-verified here. The template allows loopback only | If so, that UI would be reachable beyond the host behind Basic Auth over plain HTTP | Recreate it from the template with a loopback bind; tracked in the maintainers' private record as a separate approved change |
+| **`accounts.dat` may be world-readable (mode 0644) inside a terminal volume** (the terminal creates it; REPORTED by the maintainers for an existing instance; not re-verified here) | Any process in the container could read the terminal's binary account metadata; contents not examined | No increment assigned; needs investigation of how the terminal creates the file |
 | **Restart and stop behaviour.** Default `restart: "no"`; no reconcile-before-write; no idempotency journal; no signal handling in `start.sh`; no stop grace period set | After a reboot nothing comes back by itself; clean terminal shutdown on stop is unverified | Increment 5 (restart/recovery proof) and the contract's stop/restart design |
 | **Order lifecycle never proven on this stack** (pending, cancel, SL/TP, partial close, restart, idempotency, broker-side protection) | Nothing may be said about trading behaviour | Increment 4 (required by ADR-MT5-001 before PAPER) |
 | **Tick freshness never measured.** A tick-age check was planned in WO-MT5GW-0003 and never run | The data path is not shown to be live | Increment 3 (verify) |
@@ -41,7 +41,28 @@ makes the suite demand an update.
 | **The terminal's own local "MCP" listener** (logged at each launch) has not been characterised | Unknown bind class; not published | Characterise before any promotion (GOAL verification item 19) |
 | **The repository is public** (since 2026-09-26) and its history contains two broker server addresses and internal host details in evidence docs | Anything committed is public; some topology is already public | Accepted and recorded (ERRATA E2); making it private is the owner's separate decision |
 | **Single-file secrets, healthcheck/verify, gateway allow-list from the design contract** | Not implemented (see CONFIG-REFERENCE section 10) | Increments 2 and 3 |
-| **A legacy MT5 container and a legacy live-flagged executor (ADR-MT5-002)** exist elsewhere on the deployment host | Out of scope here; this repository must not depend on them and was not tested against them | Controlled operations work outside this repository |
+| **Legacy services outside this repository** are tracked in the maintainers' private record | Out of scope here; this repository must not depend on them and was not tested against them | Controlled operations work outside this repository |
+| **No `cap_drop`, `no-new-privileges`, `read_only` root filesystem or log rotation** in the template | Default Docker capabilities, writable root filesystem, unbounded container logs | Not assigned; add and test under Wine/MetaTrader (F8) |
+| **`EXPOSE 18812` in the `Dockerfile`** | `docker run -P` (or any override that publishes exposed ports) would publish the unauthenticated bridge (H3) on a random host port. The template never does this | Remove or document at the typed-gateway increment (F9) |
+| **Xvnc binds all interfaces inside the container** | Any peer container on the instance network can reach the UI port, whatever the host publish address; only Basic Auth protects it (and H2 can remove that) | Not assigned (F9) |
+| **New `cpus` and `pids_limit` limits are untested under Wine/MetaTrader** | The terminal could be starved or fail to spawn processes at the skeleton values (1.5 CPUs, 512 pids) | Increment 3 (first container run) (F10) |
+| **`instance.env` is injected whole into the container** (compose `env_file`), including host path variables such as the secrets directory path, seed path and env-file path | Host path layout is visible to anything inside the container; no secret values are included | Not assigned; split container and compose-only variables (F6) |
+
+## Recommendations (not actions)
+
+These are recommendations to the maintainers. Nothing here has been done by this change, and no
+credential or running instance was touched.
+
+- **Rotate the VNC password** of the instance referred to in `docs/evidence/WO-MT5GW-0007.md` at its next
+  controlled restart. That record (preserved unedited) contains details about the password's form; treat
+  the current value as exposed.
+- **Treat the May FTMO-demo credential recorded in the probe JSON under `docs/evidence/` as retired.**
+  Confirm the account is closed or the credential changed; do not reuse it.
+- **Repository settings (audit finding F11, deferred):** enable branch protection on `main` (required
+  pull request, required `validate` check, no force pushes), enable GitHub secret scanning with push
+  protection, and consider making the repository private (owner's decision; it does not change history).
+- **History:** the remote branches for WO-MT5GW-0006 to 0008 and their `reconcile/pre/*` tags still hold
+  the unredacted blob (see ERRATA E2). Rewriting public history is a separate owner decision.
 
 ## What this means in practice
 

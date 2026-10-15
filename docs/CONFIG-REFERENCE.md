@@ -98,7 +98,9 @@ using them: [OPERATOR-GUIDE.md](OPERATOR-GUIDE.md) section 4.
 3. LIVE refusal (matrix below).
 4. Secrets contract (above), directory not in the repository or config directory.
 5. No wildcard binds (schema enum), and explicit disjointness against peers on project, container,
-   network, volume, secrets directory and published port. Default peers are sibling directories of the
+   network, volume, secrets directory and published port. Secrets directories are compared after
+   path normalisation (`realpath`: trailing slash, `//`, `/./`, symlinked parents) and are rejected when
+   equal **or nested** (one inside the other). Default peers are sibling directories of the
    instance directory. `--skip-fs` skips the secrets filesystem checks only and says so.
 
 Peer disjointness is evaluated across the configs given to lint, not against Docker state on the host.
@@ -116,9 +118,9 @@ Peer disjointness is evaluated across the configs given to lint, not against Doc
 | `LIVE` | every condition above satisfied | lint can pass, but **`render` still refuses** (`LIVE_PROVISIONING_ENABLED = False`) |
 | any | `mt5ctl new` with a `live` name | refused: `new` only creates DEMO names |
 
-Implementation note, found while writing this page: the LIVE marker file check runs even with
-`--skip-fs` (it is not skipped), although the printed warning says "secrets modes, LIVE marker"
-are skipped. The effect is stricter than the message, never weaker.
+The LIVE marker file check runs even with `--skip-fs`. The printed warning (corrected after the audit,
+finding F15) says so: secrets directory/file checks are skipped, the capital-gate marker check still runs.
+When a LIVE config passes lint, lint prints a `WARNING` that `render` will still refuse it (finding F3).
 
 This is a **configuration and lint gate only**. The image contains no environment guard: whatever
 credentials the secret files hold are what the terminal will use. Nothing in the container asserts the
@@ -177,6 +179,27 @@ Network example ranges: if you need to write an address in an example, use RFC 5
 See the header of `deploy/compose.instance.yml`. Default behaviour is preserved (restart `no`, same
 volume name rule, same container name, same secret names) except: no ports unless the loopback overlay
 is added, explicit network name, `cpus`/`pids_limit` added, image is a parameter.
+
+**`instance.env` is injected whole.** The compose `env_file` passes every line of the generated
+`instance.env` into the container environment, including host-side path variables (`SECRETS_DIR`,
+`SERVERS_DAT`, `INSTANCE_ENV_FILE`) that only compose needs. No secret values are among them, but the host
+path layout is visible to anything in the container (finding F6; listed in KNOWN-LIMITATIONS).
+
+**Migration note for existing instances.** The template is not a drop-in for the previous compose
+file. Before recreating an existing instance from it:
+
+- `IMAGE_REF` is required (no default image); set `image` in `instance.yaml`.
+- There are no default ports. The UI is published only if `ports.operator_ui` is set, on loopback only;
+  an instance that was published on another address will lose that publication.
+- The network gets an explicit name (`network.name`) instead of the project-scoped `instance-net`;
+  recreating creates a new network and the old one is left behind.
+- The data volume name is `data_volume` (must start with `<instance_name>-`); if it differs from the
+  existing volume, the terminal state will not be found. Match the existing volume name or migrate the data.
+- The secrets path is a parameter (`secrets.dir`, mode 0700, files 0600, outside the repository and the
+  config directory); the old per-instance `secrets` location is not read.
+- `cpus` and `pids_limit` are new and untested under Wine/MetaTrader; `servers.dat` and `TZ` are
+  parameters. Run `mt5ctl render` and compare with `docker compose config` of the old file before any
+  `up`.
 
 ## 9. Known deferred hazards
 
