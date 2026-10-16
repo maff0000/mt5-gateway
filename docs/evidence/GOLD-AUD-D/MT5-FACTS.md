@@ -1,6 +1,6 @@
 # GOLD-AUD-D mirror note: MT5 gateway facts
 
-Mirror note of the read-only audit `GOLD-AUD-D` (GOLD MVP lane D). The primary evidence is in `maff0000/GOAL` at `audits/2026-10-15/gold-mvp/lanes/GOLD-AUD-D/` on branch `wo/GOLD-AUD-D-evidence` (local at the time of writing; not pushed, no pull request). This note carries only the gateway facts and is written to the public-repository standard: no addresses, hostnames, ports, account or credential identifiers. It changes no source, compose or template file and nothing outside `docs/evidence/GOLD-AUD-D/`.
+Mirror note of the read-only audit `GOLD-AUD-D` (GOLD MVP lane D). The primary evidence is in `maff0000/GOAL` at `audits/2026-10-15/gold-mvp/lanes/GOLD-AUD-D/` on branch `wo/GOLD-AUD-D-evidence` (opened for review as `maff0000/GOAL` pull request #14). This note carries only the gateway facts and is written to the public-repository standard: no addresses, hostnames, ports, account or credential identifiers. It changes no source, compose or template file and nothing outside `docs/evidence/GOLD-AUD-D/`.
 
 ## 1. Revision read
 
